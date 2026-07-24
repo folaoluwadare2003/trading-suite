@@ -25,8 +25,6 @@
     height:100%;
     z-index:0;
     display:block;
-    will-change:transform;
-    transition:transform 0.25s ease-out;
   }
 
   .ticker{
@@ -206,132 +204,602 @@
   (function(){
     const canvas = document.getElementById('fxbg');
     const ctx = canvas.getContext('2d');
-    const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const SYMBOLS = ['$','€','£','¥','₿','¢'];
 
-    let W, H, DPR;
+    let W, H, particles = [];
+    let mouseX = -999, mouseY = -999;
+    let t = 0;
+    let groundY = 0, mascotSize = 100;
+
     function resize(){
-      DPR = Math.min(window.devicePixelRatio || 1, 2);
-      W = window.innerWidth;
-      H = window.innerHeight;
-      canvas.width = W * DPR;
-      canvas.height = H * DPR;
-      canvas.style.width = W + 'px';
-      canvas.style.height = H + 'px';
-      ctx.setTransform(DPR,0,0,DPR,0,0);
-    }
-    window.addEventListener('resize', resize);
-    resize();
-
-    // Each lane = one "pair" scrolling independently, stacked to fill the screen.
-    const LANES = 6;
-    const CANDLE_W = 7;
-    const GAP = 3;
-    const STEP = CANDLE_W + GAP;
-
-    function makeLane(i){
-      const laneH = H / LANES;
-      const candles = [];
-      let price = 40 + Math.random()*20; // arbitrary walk, purely decorative
-      const count = Math.ceil(W / STEP) + 6;
-      for(let c=0;c<count;c++){
-        candles.push(nextCandle(price));
-        price = candles[candles.length-1].close;
+      W = canvas.width = window.innerWidth;
+      H = canvas.height = window.innerHeight;
+      buildParticles();
+      mascotSize = clamp(W * 0.075, 60, 130);
+      if(typeof bull !== 'undefined'){
+        bull.x = W * 0.22; bull.y = H*0.85;
+        bear.x = W * 0.78; bear.y = H*0.85;
       }
-      return {
-        y0: i*laneH,
-        h: laneH,
-        candles,
-        speed: 0.4 + Math.random()*0.9, // px/frame, varies per lane
-        offset: 0,
-        vol: 1.4 + Math.random()*2.2 // volatility scale
-      };
     }
 
-    function nextCandle(prevClose){
-      const vol = 0.6 + Math.random()*1.4;
-      const open = prevClose;
-      const close = open + (Math.random()-0.5) * vol * 2.2;
-      const high = Math.max(open,close) + Math.random()*vol*0.8;
-      const low = Math.min(open,close) - Math.random()*vol*0.8;
-      return {open, close, high, low};
+    function randBetween(a,b){ return a + Math.random()*(b-a); }
+    function clamp(v,a,b){ return Math.max(a, Math.min(b, v)); }
+
+    function buildParticles(){
+      const off = document.createElement('canvas');
+      off.width = W; off.height = H;
+      const octx = off.getContext('2d');
+
+      let fontSize = Math.floor(W * 0.16);
+      octx.font = `900 ${fontSize}px 'Arial Black', Arial, sans-serif`;
+      const text = 'TRADING DESK';
+      const targetWidth = W * 0.88;
+      const measured = octx.measureText(text).width;
+      if(measured > 0){
+        fontSize = Math.floor(fontSize * (targetWidth / measured));
+        fontSize = Math.max(22, Math.min(fontSize, H * 0.26));
+        octx.font = `900 ${fontSize}px 'Arial Black', Arial, sans-serif`;
+      }
+      octx.textAlign = 'center';
+      octx.textBaseline = 'middle';
+      octx.fillStyle = '#fff';
+      octx.fillText(text, W/2, H*0.42);
+
+      const img = octx.getImageData(0,0,W,H).data;
+      const spacing = Math.max(5, Math.round(W/220));
+      const parts = [];
+      for(let y=0; y<H; y+=spacing){
+        for(let x=0; x<W; x+=spacing){
+          const alpha = img[(y*W+x)*4 + 3];
+          if(alpha > 120){
+            parts.push({
+              homeX:x, homeY:y,
+              x, y,
+              vx:0, vy:0,
+              sym: SYMBOLS[Math.floor(Math.random()*SYMBOLS.length)],
+              size: randBetween(spacing*1.2, spacing*1.8),
+              amber: Math.random() < 0.32,
+              alpha: randBetween(0.55, 0.9),
+              settled: true
+            });
+          }
+        }
+      }
+      particles = parts;
     }
 
-    let lanes = [];
-    function buildLanes(){
-      lanes = [];
-      for(let i=0;i<LANES;i++) lanes.push(makeLane(i));
+    // Push nearby particles away from (cx,cy) — the original TRADING DESK scatter mechanic.
+    function scatter(cx, cy){
+      const range = 140;
+      particles.forEach(p => {
+        const dx = p.x - cx, dy = p.y - cy;
+        const dist = Math.sqrt(dx*dx + dy*dy);
+        if(dist < range){
+          const force = (1 - dist/range) * 11;
+          const ang = Math.atan2(dy, dx);
+          p.vx += Math.cos(ang) * force;
+          p.vy += Math.sin(ang) * force;
+          p.settled = false;
+        }
+      });
     }
-    buildLanes();
-    window.addEventListener('resize', buildLanes);
 
-    function drawLane(lane){
-      const {y0, h, candles, vol} = lane;
-      const mid = y0 + h/2;
-      const scale = (h*0.36) / 6; // vertical scale so candles fit their band
+    function drawParticles(){
+      particles.forEach(p => {
+        if(!p.settled){
+          p.vx *= 0.94;
+          p.vy *= 0.94;
+        }
+        p.vx += (p.homeX - p.x) * 0.02;
+        p.vy += (p.homeY - p.y) * 0.02;
+        p.x += p.vx;
+        p.y += p.vy;
 
+        const speed = Math.sqrt(p.vx*p.vx + p.vy*p.vy);
+        const distHome = Math.sqrt((p.x-p.homeX)**2 + (p.y-p.homeY)**2);
+        if(speed < 0.05 && distHome < 1){ p.vx = 0; p.vy = 0; p.settled = true; }
+
+        ctx.save();
+        ctx.globalAlpha = p.alpha;
+        ctx.font = `${p.size}px 'IBM Plex Mono', ui-monospace, monospace`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillStyle = p.amber ? '#f5a623' : '#3ddc84';
+        ctx.fillText(p.sym, p.x, p.y);
+        ctx.restore();
+      });
+    }
+
+    /* ---------- market staircase: the ground the mascots run, climb & tumble on ---------- */
+
+    const market = {
+      level: 0.35, targetLevel: 0.35, phase: 'up',
+      phaseTimer: 260, stepTimer: 0, stepInterval: 24,
+      bars: []
+    };
+    const MAX_BARS = 46;
+
+    function groundYAt(level){ return H*0.9 - level*(H*0.72); }
+
+    // the y of the actual bar-step under a given x — this is what a foot standing at x rests on
+    function groundYAtX(x){
+      if(market.bars.length < 2) return groundYAt(market.level);
+      const bw = W / MAX_BARS;
+      let idx = Math.floor(x / bw);
+      idx = clamp(idx, 0, market.bars.length-1);
+      return groundYAt(market.bars[idx]);
+    }
+
+    function updateMarket(){
+      market.phaseTimer--;
+      if(market.phaseTimer <= 0){
+        const flippedToDown = market.phase === 'up';
+        market.phase = flippedToDown ? 'down' : 'up';
+        market.phaseTimer = Math.floor(randBetween(260, 420));
+        if(flippedToDown) startTumble();
+      }
+      market.stepTimer++;
+      if(market.stepTimer >= market.stepInterval){
+        market.stepTimer = 0;
+        const dir = market.phase === 'up' ? 1 : -1;
+        market.targetLevel = clamp(market.targetLevel + dir*randBetween(0.035,0.085), 0.08, 0.9);
+        market.bars.push(market.targetLevel);
+        if(market.bars.length > MAX_BARS) market.bars.shift();
+      }
+      market.level += (market.targetLevel - market.level) * 0.12;
+    }
+
+    function drawMarket(){
+      const bw = W / MAX_BARS;
       ctx.save();
-      ctx.beginPath();
-      ctx.rect(0, y0, W, h);
-      ctx.clip();
-
-      for(let i=0;i<candles.length;i++){
-        const x = i*STEP - lane.offset;
-        if(x < -STEP || x > W+STEP) continue;
-        const c = candles[i];
-        const up = c.close >= c.open;
-        ctx.strokeStyle = up ? 'rgba(61,220,132,0.5)' : 'rgba(255,110,110,0.45)';
-        ctx.fillStyle = up ? 'rgba(61,220,132,0.28)' : 'rgba(255,110,110,0.22)';
-        ctx.lineWidth = 1;
-
-        const yHigh = mid - c.high*scale;
-        const yLow  = mid - c.low*scale;
-        const yOpen = mid - c.open*scale;
-        const yClose= mid - c.close*scale;
-        const top = Math.min(yOpen,yClose);
-        const bh = Math.max(Math.abs(yClose-yOpen), 1);
-
-        ctx.beginPath();
-        ctx.moveTo(x + CANDLE_W/2, yHigh);
-        ctx.lineTo(x + CANDLE_W/2, yLow);
-        ctx.stroke();
-
-        ctx.fillRect(x, top, CANDLE_W, bh);
-      }
+      market.bars.forEach((lvl, i) => {
+        const prev = market.bars[i-1] ?? lvl;
+        const bh = lvl * H*0.72;
+        const x = i * bw;
+        ctx.globalAlpha = 0.16;
+        ctx.fillStyle = lvl >= prev ? '#3ddc84' : '#f5a623';
+        ctx.fillRect(x, H*0.9 - bh, bw*0.82, bh);
+      });
       ctx.restore();
     }
 
-    function tick(){
-      ctx.clearRect(0,0,W,H);
-      for(const lane of lanes){
-        lane.offset += lane.speed;
-        // when a full candle-width has scrolled off, drop it and append a fresh one
-        while(lane.offset >= STEP){
-          lane.offset -= STEP;
-          lane.candles.shift();
-          const last = lane.candles[lane.candles.length-1];
-          lane.candles.push(nextCandle(last.close));
-        }
-        drawLane(lane);
-      }
-      if(!reduceMotion) requestAnimationFrame(tick);
+    /* ---------- mascots ---------- */
+
+    const bull = mkChar(1, '#e8c48a');
+    const bear = mkChar(-1, '#1c1c1c');
+    bull.role = 'chase'; bear.role = 'flee';
+    let effects = [];
+
+    function mkChar(dir, color){
+      return {
+        x:0, y:0, dir, color, role:'chase', speed: randBetween(2.1,2.6),
+        legPhase: Math.random()*10, state:'run', timer:0, rotation:0, scaleMul:1, alpha:1,
+        waveCd:0, hideSpot:0,
+        climb:0,       // 0..1 how hard this char is straining up a step right now
+        lean:0,        // forward/back body lean, eased
+        bob:0,         // vertical torso bob from the haul-up pulses
+        grunt:0,       // cooldown so effort emoji doesn't spam every frame
+        frontFoot:{x:0,y:0}, backFoot:{x:0,y:0}
+      };
     }
 
-    if(reduceMotion){
-      // Static single frame, no motion, respects the user's OS setting.
-      for(const lane of lanes) drawLane(lane);
-    } else {
+    function isFree(c){ return c.state === 'run'; }
+
+    function startTumble(){
+      if(!isFree(bull) || !isFree(bear)) return;
+      bull.state = 'tumble'; bull.timer = 34; bull.rotation = 0;
+      bear.state = 'pounce'; bear.timer = 30;
+      bear.pounceFromX = bear.x; bear.pounceFromY = bear.y;
+      bear.pounceToX = clamp(bull.x + bull.dir*mascotSize*1.4, mascotSize, W-mascotSize);
+    }
+
+    function triggerClash(a,b){
+      effects.push({x:(a.x+b.x)/2, y: Math.min(a.y,b.y) - mascotSize*0.9, life:32, text:['💥','POW!','BOOM'][Math.floor(Math.random()*3)], size: mascotSize*0.3});
+    }
+
+    // hide & seek
+    const hs = { timer: Math.floor(randBetween(420,700)) };
+
+    function updateHideSeek(){
+      hs.timer--;
+      if(hs.timer > 0) return;
+      hs.timer = Math.floor(randBetween(520,860));
+      if(!isFree(bull) || !isFree(bear)) return;
+      const hider = Math.random() < 0.5 ? bull : bear;
+      const seeker = hider === bull ? bear : bull;
+      hider.state = 'hide'; hider.timer = 18;
+      hider.hideSpot = clamp(hider.x + hider.dir*mascotSize*1.6, mascotSize, W-mascotSize);
+      seeker.state = 'search'; seeker.timer = 130;
+    }
+
+    function updateChar(self, other){
+      const margin = mascotSize*0.55;
+      const targetGY = self.state==='tumble' ? groundYAt(market.level) : groundYAtX(self.x);
+      const climbing = targetGY < self.y - 0.6; // the step ahead sits higher on screen (smaller y = up)
+
+      if(self.state==='tumble'){
+        self.y += (targetGY - self.y) * 0.5;
+        self.climb += (0 - self.climb) * 0.2;
+      } else if(climbing){
+        // haul the body up in pulses timed to each foot plant, instead of gliding smoothly —
+        // this is what reads as "struggling up a step" rather than floating over it
+        const plant = Math.pow(Math.max(0, Math.sin(self.legPhase)), 5);
+        self.y += (targetGY - self.y) * (0.045 + plant*0.42);
+        self.climb += (1 - self.climb) * 0.07;
+      } else {
+        self.y += (targetGY - self.y) * 0.24; // downhill / level ground: easy, quick to settle
+        self.climb += (0 - self.climb) * 0.05;
+      }
+      self.lean += (self.climb*0.3 - self.lean) * 0.12;
+      self.bob = Math.max(0, Math.sin(self.legPhase*2)) * self.climb * mascotSize*0.025;
+      if(self.grunt>0) self.grunt--;
+
+      switch(self.state){
+        case 'run': {
+          if(self.waveCd > 0) self.waveCd--;
+          const dx0 = mouseX-self.x, dy0 = mouseY-self.y;
+          if(Math.sqrt(dx0*dx0+dy0*dy0) < mascotSize*0.62 && self.waveCd<=0){
+            self.state = 'wave'; self.timer = 70; break;
+          }
+          let td = self.role==='chase' ? (other.x>self.x?1:-1) : (other.x>self.x?-1:1);
+          self.dir = td;
+          // strain slows the legs down and shortens stride while climbing; open ground, full speed
+          const strain = 1 - self.climb*0.55;
+          self.x = clamp(self.x + td*self.speed*strain, margin, W-margin);
+          self.legPhase += 0.32*strain + self.climb*0.06;
+          self.rotation = self.lean * td;
+          if(self.climb > 0.5 && self.grunt<=0 && Math.random()<0.02){
+            self.grunt = 50;
+            effects.push({x:self.x, y:self.y-mascotSize*0.7, life:26, text: Math.random()<0.5?'😤':'💦', size:mascotSize*0.22});
+          }
+          if(Math.abs(self.x-other.x) < mascotSize*0.5 && isFree(other)){
+            triggerClash(self, other);
+            const r=self.role; self.role=other.role; other.role=r;
+          }
+          break;
+        }
+        case 'wave': {
+          self.timer--;
+          if(self.timer<=0){ self.state='run'; self.waveCd=100; }
+          break;
+        }
+        case 'tumble': {
+          self.rotation += 0.5;
+          self.timer--;
+          self.legPhase += 0.5;
+          if(self.timer<=0){ self.state='run'; self.rotation=0; self.role='flee'; }
+          break;
+        }
+        case 'pounce': {
+          const total = 30, p = 1-(self.timer/total);
+          self.x = self.pounceFromX + (self.pounceToX-self.pounceFromX)*p;
+          self.y = groundYAt(market.level) - Math.sin(p*Math.PI)*mascotSize*1.1;
+          self.dir = self.pounceToX>self.pounceFromX ? 1 : -1;
+          self.timer--;
+          if(self.timer<=0){
+            if(Math.random()<0.45){ self.state='run'; self.role='chase'; }
+            else { self.state='stumble'; self.timer=18; }
+          }
+          break;
+        }
+        case 'stumble': {
+          self.rotation = Math.sin(t*1.4)*0.3;
+          self.timer--;
+          if(self.timer<=0){ self.state='run'; self.rotation=0; self.role='chase'; }
+          break;
+        }
+        case 'hide': {
+          self.x += (self.hideSpot-self.x)*0.2;
+          self.scaleMul += (0.7-self.scaleMul)*0.2;
+          self.timer--;
+          self.legPhase += 0.28;
+          if(self.timer<=0){ self.state='hidden'; self.timer = Math.floor(randBetween(90,160)); }
+          break;
+        }
+        case 'hidden': {
+          self.alpha += (0.18-self.alpha)*0.2;
+          self.timer--;
+          if(self.timer<=0){ self.state='found'; self.timer=26; }
+          break;
+        }
+        case 'found': {
+          self.alpha += (1-self.alpha)*0.3;
+          self.scaleMul = 1 + Math.sin((26-self.timer)/26*Math.PI)*0.35;
+          self.timer--;
+          if(self.timer<=0){
+            self.state='run'; self.scaleMul=1; self.alpha=1;
+            const r=self.role; self.role=other.role; other.role=r;
+          }
+          break;
+        }
+        case 'search': {
+          self.rotation = Math.sin(t*0.12)*0.28;
+          self.legPhase += 0.05;
+          self.timer--;
+          if(self.timer<=0 && other.state==='hidden'){ /* wait for hider to pop */ self.timer=1; }
+          if(other.state==='found'){ self.state='foundEcho'; self.timer=26; self.rotation=0; }
+          break;
+        }
+        case 'foundEcho': {
+          self.scaleMul = 1 + Math.sin((26-self.timer)/26*Math.PI)*0.3;
+          self.timer--;
+          if(self.timer<=0){ self.state='run'; self.scaleMul=1; }
+          break;
+        }
+      }
+    }
+
+    /* ---------- side-profile drawing ---------- */
+
+    function drawSeg(x1,y1,x2,y2,thick,color){
+      ctx.strokeStyle = color; ctx.lineWidth = thick; ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.moveTo(x1,y1); ctx.lineTo(x2,y2); ctx.stroke();
+    }
+
+    // real bent-knee leg: hip -> knee -> foot, solved so the foot actually lands where
+    // the walk cycle puts it, with a muscle bulge on the thigh and a planted hoof/paw
+    function ikLeg(hipX, hipY, footX, footY, thighLen, shinLen, thick, bendAmt, bendSign, color, shade, footColor){
+      const dx = footX-hipX, dy = footY-hipY;
+      const dist = Math.max(4, Math.sqrt(dx*dx+dy*dy));
+      const reach = Math.min(dist, thighLen+shinLen-1);
+      const fx = hipX + (dx/dist)*reach, fy = hipY + (dy/dist)*reach;
+      const ux = (fx-hipX)/reach, uy = (fy-hipY)/reach;
+      const px = -uy, py = ux;
+      const mx = hipX + (fx-hipX)*0.46, my = hipY + (fy-hipY)*0.46;
+      const kneeX = mx + px*bendAmt*bendSign, kneeY = my + py*bendAmt*bendSign;
+
+      // thigh (thicker, buff) then shin (leaner)
+      drawSeg(hipX, hipY, kneeX, kneeY, thick, color);
+      drawSeg(kneeX, kneeY, fx, fy, thick*0.78, shade);
+
+      // thigh muscle bulge
+      ctx.save();
+      ctx.fillStyle = color;
+      ctx.translate(hipX+(kneeX-hipX)*0.4, hipY+(kneeY-hipY)*0.4);
+      ctx.rotate(Math.atan2(kneeY-hipY, kneeX-hipX));
+      ctx.beginPath(); ctx.ellipse(0,0, thick*0.72, thick*0.52, 0,0,Math.PI*2); ctx.fill();
+      ctx.restore();
+
+      // knee joint
+      ctx.fillStyle = shade;
+      ctx.beginPath(); ctx.arc(kneeX, kneeY, thick*0.42, 0, Math.PI*2); ctx.fill();
+
+      // planted foot / hoof
+      ctx.save();
+      ctx.translate(fx,fy);
+      ctx.rotate(Math.atan2(fy-kneeY, fx-kneeX));
+      ctx.fillStyle = footColor;
+      ctx.beginPath(); ctx.ellipse(0,0, thick*0.68, thick*0.42, 0,0,Math.PI*2); ctx.fill();
+      ctx.restore();
+
+      return {kneeX, kneeY, fx, fy};
+    }
+
+    // procedural walk-cycle foot target for one leg of a pair, in the char's local space.
+    // liftPow>0 lifts the foot off the ground during the forward-swing half of its phase;
+    // climb/bob drive a higher knee-lift and shorter stride when the character is hauling
+    // itself up a step, so the legs visibly work harder instead of just gliding.
+    function stepFoot(hipX, hipY, phase, stride, groundY, liftH){
+      const swing = Math.sin(phase);
+      const lift = Math.pow(Math.max(0, swing), 1.6);
+      return { x: hipX + swing*stride, y: groundY - lift*liftH, lift };
+    }
+
+    function drawBull(s, dir, legPhase, wave, climb, bob){
+      climb = climb||0; bob = bob||0;
+      const hipY = s*0.16;
+      const groundLocal = s*0.5;
+      const stride = s*(0.2 - climb*0.07);
+      const liftH = s*0.15 + s*0.19*climb;
+
+      // back leg (planted, weight-bearing, phase offset by PI so legs alternate)
+      const back = stepFoot(-s*0.07, hipY, legPhase+Math.PI, stride, groundLocal, liftH);
+      // front leg (drives the reach onto the next step)
+      const front = stepFoot(s*0.11, hipY, legPhase, stride, groundLocal, liftH);
+
+      ikLeg(-s*0.07, hipY, back.x, back.y, s*0.24, s*0.23, s*0.135, s*0.09*(0.3+0.7*back.lift), 1, '#c9a15f', '#8a6a3a', '#2b1d12');
+      ikLeg(s*0.11, hipY, front.x, front.y, s*0.24, s*0.23, s*0.14, s*0.09*(0.3+0.7*front.lift), 1, '#e8c48a', '#c9a15f', '#2b1d12');
+
+      // torso — broader, gradient-shaded for a rounded, muscular "toy" volume
+      const bodyCx = -s*0.02, bodyCy = -bob;
+      const grad = ctx.createRadialGradient(bodyCx-s*0.08, bodyCy-s*0.14, s*0.05, bodyCx, bodyCy, s*0.42);
+      grad.addColorStop(0, '#f6dcaa');
+      grad.addColorStop(0.55, '#e8c48a');
+      grad.addColorStop(1, '#b98f52');
+      ctx.fillStyle = grad;
+      ctx.beginPath(); ctx.ellipse(bodyCx, bodyCy, s*0.38, s*0.25, 0,0,Math.PI*2); ctx.fill();
+      // chest/pec definition — broad puffed-out chest, bull is built
+      ctx.strokeStyle='rgba(120,85,40,0.45)'; ctx.lineWidth=s*0.018; ctx.lineCap='round';
+      ctx.beginPath(); ctx.moveTo(s*0.1, bodyCy-s*0.02); ctx.quadraticCurveTo(s*0.02, bodyCy+s*0.06, -s*0.06, bodyCy-s*0.01); ctx.stroke();
+      ctx.beginPath(); ctx.ellipse(s*0.14, bodyCy-s*0.06, s*0.1, s*0.08, -0.2,0,Math.PI*2); ctx.stroke();
+      // shoulder/traps bulge behind the neck
+      ctx.fillStyle = '#dcb27c';
+      ctx.beginPath(); ctx.ellipse(s*0.16, bodyCy-s*0.19, s*0.13, s*0.12, 0.3,0,Math.PI*2); ctx.fill();
+      // tail
+      ctx.strokeStyle = '#c9a15f'; ctx.lineWidth = s*0.045; ctx.lineCap='round';
+      ctx.beginPath(); ctx.moveTo(-s*0.34,bodyCy-s*0.02); ctx.quadraticCurveTo(-s*0.5,bodyCy+s*0.1,-s*0.42,bodyCy+s*0.24); ctx.stroke();
+      // neck (thick, bull-strong)
+      ctx.fillStyle = '#dcb27c';
+      ctx.beginPath(); ctx.ellipse(s*0.24, bodyCy-s*0.14, s*0.13, s*0.15, -0.3,0,Math.PI*2); ctx.fill();
+      // head
+      ctx.fillStyle = '#e8c48a';
+      ctx.beginPath(); ctx.ellipse(s*0.32, bodyCy-s*0.18, s*0.22, s*0.19, 0,0,Math.PI*2); ctx.fill();
+      // ear
+      ctx.beginPath(); ctx.ellipse(s*0.2,bodyCy-s*0.34, s*0.06, s*0.09, -0.4,0,Math.PI*2); ctx.fill();
+      // horn
+      ctx.strokeStyle = '#2b1d12'; ctx.lineWidth = s*0.065; ctx.lineCap='round';
+      ctx.beginPath(); ctx.moveTo(s*0.32,bodyCy-s*0.34); ctx.quadraticCurveTo(s*0.42,bodyCy-s*0.52, s*0.26,bodyCy-s*0.52); ctx.stroke();
+      // snout
+      ctx.fillStyle = '#f5e6c8';
+      ctx.beginPath(); ctx.ellipse(s*0.47,bodyCy-s*0.13, s*0.11, s*0.09, 0,0,Math.PI*2); ctx.fill();
+      ctx.fillStyle='#1a1a1a';
+      ctx.beginPath(); ctx.arc(s*0.44,bodyCy-s*0.12,s*0.018,0,Math.PI*2); ctx.fill();
+      // eye — narrows a touch and furrows under strain while climbing
+      ctx.save();
+      ctx.translate(s*0.36, bodyCy-s*0.22);
+      ctx.scale(1, 1-climb*0.35);
+      ctx.fillStyle='#1a1a1a';
+      ctx.beginPath(); ctx.arc(0,0,s*0.03,0,Math.PI*2); ctx.fill();
+      ctx.restore();
+      // trailing pennant
+      if(!wave){
+        ctx.fillStyle='#3ddc84'; ctx.globalAlpha=0.85;
+        ctx.beginPath(); ctx.moveTo(-s*0.42,bodyCy-s*0.28); ctx.lineTo(-s*0.54,bodyCy-s*0.2); ctx.lineTo(-s*0.42,bodyCy-s*0.14); ctx.closePath(); ctx.fill();
+        ctx.globalAlpha=1;
+      }
+      if(wave){
+        const wig = Math.sin(t*0.6)*0.5;
+        ctx.save(); ctx.translate(s*0.2,bodyCy-s*0.07); ctx.rotate(wig);
+        ctx.strokeStyle='#e8c48a'; ctx.lineWidth=s*0.1; ctx.lineCap='round';
+        ctx.beginPath(); ctx.moveTo(0,0); ctx.lineTo(0,-s*0.3); ctx.stroke();
+        ctx.fillStyle='#e8c48a'; ctx.beginPath(); ctx.arc(0,-s*0.3,s*0.065,0,Math.PI*2); ctx.fill();
+        ctx.restore();
+      }
+    }
+
+    function drawBear(s, dir, legPhase, wave, climb, bob){
+      climb = climb||0; bob = bob||0;
+      const hipY = s*0.16;
+      const groundLocal = s*0.5;
+      const stride = s*(0.19 - climb*0.07);
+      const liftH = s*0.15 + s*0.2*climb;
+
+      const back = stepFoot(-s*0.07, hipY, legPhase+Math.PI, stride, groundLocal, liftH);
+      const front = stepFoot(s*0.11, hipY, legPhase, stride, groundLocal, liftH);
+
+      ikLeg(-s*0.07, hipY, back.x, back.y, s*0.23, s*0.22, s*0.145, s*0.095*(0.3+0.7*back.lift), 1, '#141414', '#050505', '#0a0a0a');
+      ikLeg(s*0.11, hipY, front.x, front.y, s*0.23, s*0.22, s*0.15, s*0.095*(0.3+0.7*front.lift), 1, '#1c1c1c', '#0a0a0a', '#0a0a0a');
+
+      const bodyCx = -s*0.02, bodyCy = -bob;
+      const grad = ctx.createRadialGradient(bodyCx-s*0.08, bodyCy-s*0.14, s*0.05, bodyCx, bodyCy, s*0.44);
+      grad.addColorStop(0, '#3a3a3a');
+      grad.addColorStop(0.55, '#1c1c1c');
+      grad.addColorStop(1, '#0a0a0a');
+      ctx.fillStyle = grad;
+      ctx.beginPath(); ctx.ellipse(bodyCx, bodyCy, s*0.4, s*0.27, 0,0,Math.PI*2); ctx.fill();
+      // broad, powerlifter chest definition
+      ctx.strokeStyle='rgba(255,255,255,0.08)'; ctx.lineWidth=s*0.018; ctx.lineCap='round';
+      ctx.beginPath(); ctx.moveTo(s*0.1, bodyCy-s*0.02); ctx.quadraticCurveTo(s*0.02, bodyCy+s*0.07, -s*0.07, bodyCy-s*0.01); ctx.stroke();
+      ctx.beginPath(); ctx.ellipse(s*0.15, bodyCy-s*0.06, s*0.11, s*0.09, -0.2,0,Math.PI*2); ctx.stroke();
+      // trap/shoulder bulk
+      ctx.fillStyle = '#242424';
+      ctx.beginPath(); ctx.ellipse(s*0.17, bodyCy-s*0.2, s*0.14, s*0.13, 0.3,0,Math.PI*2); ctx.fill();
+      // tail
+      ctx.fillStyle = '#1c1c1c';
+      ctx.beginPath(); ctx.arc(-s*0.36,bodyCy-s*0.02,s*0.075,0,Math.PI*2); ctx.fill();
+      // neck
+      ctx.fillStyle = '#242424';
+      ctx.beginPath(); ctx.ellipse(s*0.25, bodyCy-s*0.15, s*0.14, s*0.16, -0.3,0,Math.PI*2); ctx.fill();
+      // head
+      ctx.fillStyle = '#1c1c1c';
+      ctx.beginPath(); ctx.ellipse(s*0.32,bodyCy-s*0.16, s*0.24, s*0.21, 0,0,Math.PI*2); ctx.fill();
+      // ear
+      ctx.beginPath(); ctx.arc(s*0.2,bodyCy-s*0.34,s*0.078,0,Math.PI*2); ctx.fill();
+      // snout
+      ctx.fillStyle = '#3a3a3a';
+      ctx.beginPath(); ctx.ellipse(s*0.49,bodyCy-s*0.11, s*0.12, s*0.09, 0,0,Math.PI*2); ctx.fill();
+      ctx.fillStyle = '#0a0a0a';
+      ctx.beginPath(); ctx.arc(s*0.45,bodyCy-s*0.1,s*0.02,0,Math.PI*2); ctx.fill();
+      // eye — furrows under strain while climbing
+      ctx.save();
+      ctx.translate(s*0.34, bodyCy-s*0.2);
+      ctx.scale(1, 1-climb*0.35);
+      ctx.fillStyle='#e8e8e8';
+      ctx.beginPath(); ctx.arc(0,0,s*0.03,0,Math.PI*2); ctx.fill();
+      ctx.fillStyle='#0a0a0a';
+      ctx.beginPath(); ctx.arc(s*0.01,0,s*0.015,0,Math.PI*2); ctx.fill();
+      ctx.restore();
+      if(!wave){
+        ctx.fillStyle='#f5a623'; ctx.globalAlpha=0.85;
+        ctx.beginPath(); ctx.moveTo(-s*0.44,bodyCy-s*0.26); ctx.lineTo(-s*0.56,bodyCy-s*0.34); ctx.lineTo(-s*0.44,bodyCy-s*0.4); ctx.closePath(); ctx.fill();
+        ctx.globalAlpha=1;
+      }
+      if(wave){
+        const wig = Math.sin(t*0.6)*0.5;
+        ctx.save(); ctx.translate(s*0.22,bodyCy-s*0.05); ctx.rotate(wig);
+        ctx.strokeStyle='#1c1c1c'; ctx.lineWidth=s*0.11; ctx.lineCap='round';
+        ctx.beginPath(); ctx.moveTo(0,0); ctx.lineTo(0,-s*0.3); ctx.stroke();
+        ctx.fillStyle='#1c1c1c'; ctx.beginPath(); ctx.arc(0,-s*0.3,s*0.07,0,Math.PI*2); ctx.fill();
+        ctx.restore();
+      }
+    }
+
+    function bubbleFor(c){
+      if(c.state==='wave') return null;
+      if(c.state==='search') return '❓';
+      if(c.state==='found' || c.state==='foundEcho') return '❗';
+      if(c.state==='stumble') return '😵';
+      if(c.state==='tumble') return '😱';
+      return null;
+    }
+
+    function renderChar(c, drawFn){
+      if(c.state==='hidden' && c.alpha < 0.05) return;
+      ctx.save();
+      ctx.globalAlpha = c.alpha;
+      ctx.translate(c.x, c.y);
+      ctx.rotate(c.rotation);
+      ctx.scale(c.dir*c.scaleMul, c.scaleMul);
+      drawFn(mascotSize, c.dir, c.legPhase, c.state==='wave', c.climb, c.bob);
+      ctx.restore();
+
+      const bub = bubbleFor(c);
+      if(bub){
+        ctx.save();
+        ctx.globalAlpha = c.alpha;
+        ctx.font = `${mascotSize*0.3}px sans-serif`;
+        ctx.textAlign='center'; ctx.textBaseline='middle';
+        ctx.fillText(bub, c.x, c.y - mascotSize*0.62);
+        ctx.restore();
+      }
+      if((c.state==='run' && Math.random()<0.35)){
+        effects.push({x:c.x-c.dir*mascotSize*0.4, y:c.y+mascotSize*0.05, life:16, text:'💨', size:mascotSize*0.2});
+      }
+    }
+
+    /* ---------- main loop ---------- */
+
+    function tick(){
+      t++;
+      ctx.clearRect(0,0,W,H);
+
+      drawMarket();
+      drawParticles();
+
+      updateMarket();
+      updateHideSeek();
+      updateChar(bull, bear);
+      updateChar(bear, bull);
+
+      renderChar(bull, drawBull);
+      renderChar(bear, drawBear);
+
+      effects = effects.filter(e => e.life > 0);
+      effects.forEach(e => {
+        e.life--;
+        ctx.save();
+        ctx.globalAlpha = clamp(e.life / 20, 0, 1);
+        ctx.font = `${e.size || 30}px 'IBM Plex Mono', sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillStyle = '#f5a623';
+        ctx.fillText(e.text, e.x, e.y - (20 - e.life)*0.5);
+        ctx.restore();
+      });
+
       requestAnimationFrame(tick);
     }
 
-    // Cursor parallax: background shifts slightly opposite the mouse for depth.
-    window.addEventListener('mousemove', (e)=>{
-      const dx = (e.clientX / W - 0.5) * 14;
-      const dy = (e.clientY / H - 0.5) * 10;
-      canvas.style.transform = `translate(${-dx}px, ${-dy}px) scale(1.02)`;
+    document.addEventListener('mousemove', e => {
+      mouseX = e.clientX; mouseY = e.clientY;
+      scatter(mouseX, mouseY);
     });
-    window.addEventListener('mouseleave', ()=>{
-      canvas.style.transform = 'translate(0,0) scale(1.02)';
-    });
+    document.addEventListener('mouseleave', () => { mouseX = -999; mouseY = -999; });
+
+    window.addEventListener('resize', resize);
+    resize();
+
+    tick();
   })();
   </script>
 
