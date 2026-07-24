@@ -1,0 +1,2166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Forex News Simulator</title>
+<style>
+* { box-sizing:border-box; margin:0; padding:0; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  background:#080808; color:#e8e8e5; height:100vh; overflow:hidden;
+  display:flex; flex-direction:column;
+}
+
+/* ── TOP BAR ── */
+.topbar {
+  display:flex; align-items:center; justify-content:space-between;
+  padding:0 18px; height:48px; background:#0d0d0d;
+  border-bottom:1px solid #1e1e1e; flex-shrink:0;
+}
+.topbar-left { display:flex; align-items:center; gap:12px; }
+.logo { font-size:16px; font-weight:700; letter-spacing:.5px; }
+.logo span { color:#22c55e; }
+.live-dot { width:8px; height:8px; border-radius:50%; background:#22c55e; animation:pulse 1.5s infinite; }
+@keyframes pulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.5;transform:scale(1.4)} }
+.clock { font-size:13px; color:#666; font-variant-numeric:tabular-nums; }
+.session-badge { font-size:11px; padding:3px 10px; border-radius:999px; font-weight:600; letter-spacing:.5px; }
+.session-london { background:#1a3a2a; color:#22c55e; }
+.session-ny { background:#1a1a3a; color:#60a5fa; }
+.session-asian { background:#2a1a1a; color:#f59e0b; }
+.session-overlap { background:#2a1a3a; color:#a78bfa; }
+
+/* ── SPLIT LAYOUT ── */
+.split { display:flex; flex:1; overflow:hidden; }
+
+/* ── LEFT: NEWS PANEL ── */
+.news-panel {
+  width:380px; min-width:300px; flex-shrink:0;
+  background:#0d0d0d; border-right:1px solid #1e1e1e;
+  display:flex; flex-direction:column; overflow:hidden;
+}
+.panel-header {
+  padding:12px 16px; border-bottom:1px solid #1e1e1e;
+  display:flex; align-items:center; justify-content:space-between; flex-shrink:0;
+}
+.panel-title { font-size:13px; font-weight:600; color:#aaa; text-transform:uppercase; letter-spacing:.8px; }
+.filter-row { display:flex; gap:5px; padding:10px 12px; border-bottom:1px solid #1e1e1e; flex-shrink:0; flex-wrap:wrap; }
+.fbtn { font-size:11px; padding:3px 10px; border-radius:999px; border:1px solid #2a2a2a; background:transparent; color:#666; cursor:pointer; transition:all .15s; }
+.fbtn:hover { color:#e8e8e5; border-color:#555; }
+.fbtn.active { border-color:#22c55e; color:#22c55e; background:#0d2a1a; }
+.fbtn.f-high.active { border-color:#ef4444; color:#ef4444; background:#2a0d0d; }
+.fbtn.f-med.active { border-color:#f59e0b; color:#f59e0b; background:#2a1e0d; }
+.fbtn.f-low.active { border-color:#3b82f6; color:#3b82f6; background:#0d1a2a; }
+
+.news-list { flex:1; overflow-y:auto; padding:8px 0; }
+.news-list::-webkit-scrollbar { width:4px; }
+.news-list::-webkit-scrollbar-track { background:#0d0d0d; }
+.news-list::-webkit-scrollbar-thumb { background:#2a2a2a; border-radius:2px; }
+
+.news-item {
+  padding:12px 14px; border-bottom:1px solid #111; cursor:pointer;
+  transition:background .15s; position:relative; border-left:3px solid transparent;
+}
+.news-item:hover { background:#141414; }
+.news-item.selected { background:#141414; border-left-color:#22c55e; }
+.news-item.impact-high { border-left-color:#ef4444; }
+.news-item.impact-med { border-left-color:#f59e0b; }
+.news-item.impact-low { border-left-color:#3b82f6; }
+.news-item.fired { opacity:.5; }
+.news-item.firing { background:#1a2a1a !important; border-left-color:#22c55e !important; animation:newsFlash .6s ease 3; }
+@keyframes newsFlash { 0%,100%{background:#1a2a1a} 50%{background:#0d3a1a} }
+
+.ni-top { display:flex; align-items:center; justify-content:space-between; margin-bottom:5px; }
+.ni-time { font-size:12px; color:#888; font-variant-numeric:tabular-nums; }
+.ni-countdown { font-size:11px; font-weight:600; color:#f59e0b; }
+.impact-dot { width:8px; height:8px; border-radius:50%; flex-shrink:0; }
+.impact-high .impact-dot { background:#ef4444; }
+.impact-med .impact-dot { background:#f59e0b; }
+.impact-low .impact-dot { background:#3b82f6; }
+.ni-event { font-size:13px; font-weight:500; color:#e8e8e5; margin-bottom:4px; display:flex; align-items:center; gap:6px; }
+.ni-meta { display:flex; align-items:center; gap:8px; }
+.currency-flag { font-size:14px; }
+.currency-tag { font-size:11px; font-weight:700; padding:1px 6px; border-radius:4px; background:#1a1a1a; color:#aaa; }
+.ni-forecast { font-size:11px; color:#666; }
+.ni-actual { font-size:11px; font-weight:700; }
+.ni-actual.better { color:#22c55e; }
+.ni-actual.worse { color:#ef4444; }
+
+/* ── MULTI-EVENT SIM INCLUSION ── */
+.ni-sim-toggle {
+  display:flex; align-items:center; gap:5px; font-size:10px; color:#555;
+  margin-top:6px; padding-top:6px; border-top:1px dashed #1e1e1e;
+}
+.ni-sim-toggle input { accent-color:#22c55e; cursor:pointer; }
+.ni-sim-toggle label { cursor:pointer; user-select:none; }
+.news-item.auto-included .ni-sim-toggle { color:#22c55e; }
+.news-item.auto-included { background:#0d160f; }
+.sim-multi-hint {
+  font-size:10px; color:#555; padding:6px 14px 0; line-height:1.5;
+}
+.sim-multi-hint b { color:#888; }
+.ai-status {
+  font-size:11px; padding:2px 10px; border-radius:999px; font-weight:600;
+  margin-left:6px; white-space:nowrap;
+}
+.ai-status.thinking { background:#1a2a1a; color:#22c55e; }
+.ai-status.ok { background:#0d2a1a; color:#22c55e; }
+.ai-status.fallback { background:#2a1e0d; color:#f59e0b; }
+
+/* ── RIGHT: CHART PANEL ── */
+.chart-panel { flex:1; display:flex; flex-direction:column; overflow:hidden; }
+.chart-header {
+  padding:10px 16px; border-bottom:1px solid #1e1e1e;
+  display:flex; align-items:center; gap:12px; flex-shrink:0; flex-wrap:wrap;
+}
+.pair-selector { display:flex; gap:6px; flex-wrap:wrap; }
+.pair-btn {
+  font-size:12px; padding:4px 12px; border-radius:6px; border:1px solid #2a2a2a;
+  background:transparent; color:#888; cursor:pointer; transition:all .15s; font-weight:500;
+}
+.pair-btn:hover { color:#e8e8e5; border-color:#555; }
+.pair-btn.active { background:#22c55e; color:#000; border-color:#22c55e; font-weight:700; }
+.tf-selector { display:flex; gap:4px; margin-left:auto; }
+.tf-btn { font-size:11px; padding:3px 9px; border-radius:4px; border:1px solid #2a2a2a; background:transparent; color:#666; cursor:pointer; }
+.tf-btn.active { background:#1e1e1e; color:#e8e8e5; border-color:#555; }
+#chart-wrap { flex:1; position:relative; overflow:hidden; }
+#lw-chart { width:100%; height:100%; }
+#chart-info { position:absolute; top:10px; left:14px; z-index:10; pointer-events:none; }
+#chart-price { font-size:22px; font-weight:700; font-variant-numeric:tabular-nums; }
+#chart-change { font-size:13px; margin-top:2px; }
+#chart-loading { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; flex-direction:column; gap:10px; background:#0d0d0d; z-index:20; }
+#chart-loading .spinner { width:28px; height:28px; border:3px solid #222; border-top-color:#22c55e; border-radius:50%; animation:spin .7s linear infinite; }
+@keyframes spin { to{transform:rotate(360deg)} }
+#chart-loading p { font-size:13px; color:#666; }
+#chart-source { position:absolute; bottom:6px; right:10px; font-size:10px; color:#333; z-index:10; pointer-events:none; }
+
+/* ── NEWS IMPACT POPUP ── */
+#news-popup {
+  position:fixed; bottom:20px; right:20px; width:340px;
+  background:#111; border:1px solid #333; border-radius:14px;
+  box-shadow:0 8px 40px rgba(0,0,0,.8); z-index:9000;
+  display:none; overflow:hidden;
+  animation:slideUp .3s cubic-bezier(.17,.67,.3,1.1) forwards;
+}
+@keyframes slideUp { 0%{transform:translateY(20px);opacity:0} 100%{transform:translateY(0);opacity:1} }
+.popup-header {
+  display:flex; align-items:center; justify-content:space-between;
+  padding:12px 14px; border-bottom:1px solid #1e1e1e;
+  background:#0d2a1a;
+}
+.popup-title { font-size:13px; font-weight:700; color:#22c55e; }
+.popup-close { background:none; border:none; color:#888; font-size:20px; cursor:pointer; line-height:1; padding:0 2px; }
+.popup-close:hover { color:#fff; }
+.popup-body { padding:14px; }
+.popup-event { font-size:15px; font-weight:600; margin-bottom:10px; }
+.popup-grid { display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px; margin-bottom:12px; }
+.pg-item { background:#1a1a1a; border-radius:8px; padding:8px 10px; text-align:center; }
+.pg-label { font-size:10px; color:#666; margin-bottom:3px; text-transform:uppercase; }
+.pg-value { font-size:14px; font-weight:700; }
+.pg-value.better { color:#22c55e; }
+.pg-value.worse { color:#ef4444; }
+.popup-analysis { font-size:12px; color:#aaa; line-height:1.6; margin-bottom:12px; }
+.popup-expectation {
+  font-size:12px; font-weight:700; padding:6px 12px; border-radius:6px;
+  display:inline-block; margin-bottom:12px;
+}
+.exp-bullish { background:#0d2a1a; color:#22c55e; }
+.exp-bearish { background:#2a0d0d; color:#ef4444; }
+.exp-neutral { background:#1a1a1a; color:#888; }
+
+/* ── VIDEO MODAL ── */
+#video-modal {
+  position:fixed; top:0; left:0; width:100%; height:100%;
+  background:rgba(0,0,0,.9); z-index:99999; display:none;
+  align-items:center; justify-content:center; flex-direction:column; gap:16px;
+}
+.vm-box { width:min(800px,95vw); background:#111; border-radius:16px; overflow:hidden; border:1px solid #333; }
+.vm-header { display:flex; align-items:center; justify-content:space-between; padding:14px 18px; background:#0d0d0d; border-bottom:1px solid #1e1e1e; }
+.vm-title { font-size:14px; font-weight:600; color:#22c55e; }
+.vm-close { background:none; border:none; color:#888; font-size:24px; cursor:pointer; }
+.vm-close:hover { color:#fff; }
+#yt-frame { width:100%; aspect-ratio:16/9; border:none; display:block; }
+.vm-news-info { background:#0d0d0d; padding:14px 18px; }
+.vm-news-title { font-size:15px; font-weight:600; margin-bottom:6px; }
+.vm-news-meta { font-size:12px; color:#888; }
+.vm-disclaimer { font-size:11px; color:#555; text-align:center; max-width:500px; line-height:1.5; }
+
+/* ── OFFLINE BANNER ── */
+#offline-banner {
+  display:none; background:#2a1a0d; border-bottom:1px solid #f59e0b44;
+  padding:6px 16px; font-size:12px; color:#f59e0b; text-align:center; flex-shrink:0;
+}
+
+/* ── SIMULATION TOOLBAR ── */
+.sim-toolbar {
+  display:flex; align-items:center; gap:8px; padding:8px 14px;
+  border-bottom:1px solid #1e1e1e; flex-shrink:0; flex-wrap:wrap; background:#0a0a0a;
+}
+.sim-label { font-size:11px; color:#555; text-transform:uppercase; letter-spacing:.6px; white-space:nowrap; }
+.sim-select {
+  font-size:12px; padding:4px 8px; background:#141414; border:1px solid #2a2a2a;
+  border-radius:6px; color:#aaa; cursor:pointer; font-family:inherit;
+}
+.sim-select:focus { outline:none; border-color:#555; }
+.btn-run-sim {
+  padding:5px 16px; background:#22c55e; color:#000; border:none; border-radius:6px;
+  font-size:12px; font-weight:700; cursor:pointer; white-space:nowrap; margin-left:auto;
+  transition:background .15s;
+}
+.btn-run-sim:hover { background:#16a34a; }
+.btn-run-sim:disabled { background:#1a3a1a; color:#555; cursor:not-allowed; }
+.btn-reset-sim {
+  padding:5px 12px; background:transparent; color:#888; border:1px solid #2a2a2a;
+  border-radius:6px; font-size:12px; cursor:pointer; display:none;
+}
+.btn-reset-sim:hover { color:#e8e8e5; border-color:#555; }
+
+/* ── SIM HISTORY ── */
+#sim-history-btn {
+  padding:5px 12px; background:transparent; color:#60a5fa; border:1px solid #1a2a4a;
+  border-radius:6px; font-size:12px; cursor:pointer;
+}
+#sim-history-btn:hover { background:#0d1a2a; }
+
+/* ── COMMENTARY PANEL ── */
+#commentary-panel {
+  position:absolute; bottom:0; left:0; right:0; z-index:30;
+  background:linear-gradient(transparent, #0a0a0aee 20%, #0a0a0a);
+  padding:10px 16px 14px; pointer-events:none; display:none;
+}
+#commentary-panel.visible { display:block; }
+.commentary-badge {
+  display:inline-block; font-size:10px; font-weight:700; padding:2px 8px;
+  border-radius:999px; background:#1a2a1a; color:#22c55e; margin-bottom:6px;
+  letter-spacing:.5px; text-transform:uppercase;
+}
+.commentary-text { font-size:12px; color:#ccc; line-height:1.6; max-height:80px; overflow-y:auto; }
+
+/* ── SIM DISCLAIMER ── */
+#sim-disclaimer {
+  position:absolute; top:8px; right:8px; z-index:25;
+  background:#2a1a0d; border:1px solid #f59e0b44; border-radius:6px;
+  padding:4px 10px; font-size:10px; color:#f59e0b; pointer-events:none; display:none;
+}
+
+/* ── SIM HISTORY MODAL ── */
+#sim-history-modal {
+  position:fixed; top:0; left:0; width:100%; height:100%;
+  background:rgba(0,0,0,.88); z-index:88888; display:none;
+  align-items:center; justify-content:center;
+}
+.shm-box {
+  background:#111; border:1px solid #2a2a2a; border-radius:16px;
+  width:min(640px,95vw); max-height:80vh; display:flex; flex-direction:column; overflow:hidden;
+}
+.shm-header {
+  display:flex; align-items:center; justify-content:space-between;
+  padding:14px 18px; border-bottom:1px solid #1e1e1e;
+}
+.shm-title { font-size:14px; font-weight:600; }
+.shm-close { background:none; border:none; color:#888; font-size:22px; cursor:pointer; }
+.shm-list { flex:1; overflow-y:auto; padding:8px 0; }
+.shm-item {
+  display:grid; grid-template-columns:1fr auto auto auto;
+  gap:10px; align-items:center;
+  padding:12px 18px; border-bottom:1px solid #141414; font-size:13px;
+}
+.shm-item:hover { background:#141414; }
+.shm-item-left { }
+.shm-item-pair { font-weight:600; margin-bottom:2px; }
+.shm-item-meta { font-size:11px; color:#666; }
+.shm-btn { font-size:11px; padding:3px 10px; border-radius:5px; border:1px solid #2a2a2a; background:transparent; color:#888; cursor:pointer; }
+.shm-btn:hover { color:#e8e8e5; border-color:#555; }
+.shm-btn.replay { border-color:#22c55e44; color:#22c55e; }
+.shm-btn.del { border-color:#ef444444; color:#ef4444; }
+.shm-empty { padding:30px; text-align:center; color:#555; font-size:13px; }
+
+/* ── SCROLLBAR ── */
+.news-list { scrollbar-width:thin; scrollbar-color:#2a2a2a #0d0d0d; }
+.commentary-text::-webkit-scrollbar { width:3px; }
+.commentary-text::-webkit-scrollbar-thumb { background:#2a2a2a; }
+</style>
+</head>
+<body>
+
+<!-- OFFLINE BANNER -->
+<div id="offline-banner">⚠️ You are offline — showing cached/simulated news. Chart and video require internet connection.</div>
+
+<!-- TOP BAR -->
+<div class="topbar">
+  <div class="topbar-left">
+    <div class="logo">Forex<span>Sim</span></div>
+    <div class="live-dot"></div>
+    <span class="clock" id="clock">--:--:-- WAT</span>
+    <span class="session-badge" id="session-badge">Loading...</span>
+  </div>
+  <div style="font-size:12px;color:#555;">Next event: <span id="next-event-label" style="color:#f59e0b;">—</span></div>
+</div>
+
+<!-- SPLIT -->
+<div class="split">
+
+  <!-- LEFT: NEWS -->
+  <div class="news-panel">
+    <div class="panel-header">
+      <span class="panel-title">📰 Economic Calendar</span>
+      <span style="font-size:11px;color:#555;" id="news-date">Today</span>
+    </div>
+    <div class="filter-row">
+      <button class="fbtn active" onclick="setImpactFilter('all',this)">All</button>
+      <button class="fbtn f-high" onclick="setImpactFilter('high',this)">🔴 High</button>
+      <button class="fbtn f-med" onclick="setImpactFilter('med',this)">🟡 Medium</button>
+      <button class="fbtn f-low" onclick="setImpactFilter('low',this)">🔵 Low</button>
+    </div>
+    <div class="news-list" id="news-list"></div>
+  </div>
+
+  <!-- RIGHT: CHART -->
+  <div class="chart-panel">
+    <div class="chart-header">
+      <div class="pair-selector" id="pair-selector"></div>
+      <div class="tf-selector">
+        <span style="font-size:10px;color:#555;text-transform:uppercase;letter-spacing:.6px;align-self:center;margin-right:2px;">Chart Timeframe:</span>
+        <div id="tf-selector-buttons" style="display:flex;gap:4px;"></div>
+      </div>
+    </div>
+    <!-- SIMULATION TOOLBAR -->
+    <div class="sim-multi-hint">
+      <b>Multiple news at once:</b> every event checked "include in sim" below is factored in together — high/med impact events for the active pair within ±6h of now are auto-included; tick/untick any event to customize. <b>Automatic</b> scenario now has Claude read all included events (headlines + forecast/actual) and judge the likely reaction itself, instead of picking a scenario at random.
+    </div>
+    <div class="sim-toolbar">
+      <span style="font-size:10px;color:#f59e0b;text-transform:uppercase;letter-spacing:.8px;font-weight:700;margin-right:8px;">⚡ News Simulation (does not change the live chart above)</span>
+      <span class="sim-label">Forecast Horizon (Simulation Only):</span>
+      <select class="sim-select" id="sim-horizon">
+        <option value="15m">15 Minutes</option>
+        <option value="30m">30 Minutes</option>
+        <option value="1H" selected>1 Hour</option>
+        <option value="4H">4 Hours</option>
+        <option value="1D">1 Day</option>
+        <option value="1W">1 Week</option>
+      </select>
+      <span class="sim-label">Scenario</span>
+      <select class="sim-select" id="sim-scenario">
+        <option value="auto">Automatic (AI reads the news)</option>
+        <option value="bullish">Bullish</option>
+        <option value="bearish">Bearish</option>
+        <option value="neutral">Neutral</option>
+        <option value="continuation">Trend Continuation</option>
+        <option value="reversal">Trend Reversal</option>
+        <option value="highvol">High Volatility</option>
+        <option value="lowvol">Low Volatility</option>
+        <option value="liq">Liquidity Grab</option>
+        <option value="range">Range / Consolidation</option>
+      </select>
+      <span class="ai-status" id="ai-status" style="display:none;"></span>
+      <button id="sim-history-btn" onclick="openSimHistory()">📋 History</button>
+      <button class="btn-reset-sim" id="btn-reset-sim" onclick="resetSimulation()">✕ Reset</button>
+      <button class="btn-run-sim" id="btn-run-sim" onclick="runSimulation()">▶ Run News Simulation</button>
+    </div>
+    <div id="chart-wrap">
+      <div id="chart-loading"><div class="spinner"></div><p>Loading chart…</p></div>
+      <div id="chart-info">
+        <div id="chart-price" style="color:#e8e8e5;">—</div>
+        <div id="chart-change" style="color:#666;">— —</div>
+        <div id="chart-asof" style="font-size:10px;color:#666;margin-top:2px;">As of: —</div>
+        <div id="chart-tf-label" style="font-size:11px;color:#888;margin-top:4px;font-weight:600;letter-spacing:.5px;">TIMEFRAME: —</div>
+      </div>
+      <canvas id="main-canvas"></canvas>
+      <div id="sim-disclaimer">⚠️ HYPOTHETICAL SIMULATION — NOT A MARKET PREDICTION</div>
+      <div id="commentary-panel">
+        <div class="commentary-badge">📊 Institutional Commentary</div>
+        <div class="commentary-text" id="commentary-text"></div>
+      </div>
+      <div id="chart-source">Data: Twelvedata / simulated offline</div>
+    </div>
+  </div>
+
+</div>
+
+<!-- SIM HISTORY MODAL -->
+<div id="sim-history-modal" onclick="if(event.target===this)closeSimHistory()">
+  <div class="shm-box">
+    <div class="shm-header">
+      <span class="shm-title">📋 Simulation History</span>
+      <button class="shm-close" onclick="closeSimHistory()">×</button>
+    </div>
+    <div class="shm-list" id="shm-list"></div>
+  </div>
+</div>
+
+<!-- NEWS IMPACT POPUP -->
+<div id="news-popup">
+  <div class="popup-header">
+    <span class="popup-title">🚨 NEWS BREAKING</span>
+    <button class="popup-close" onclick="closePopup()">×</button>
+  </div>
+  <div class="popup-body">
+    <div class="popup-event" id="pop-event"></div>
+    <div class="popup-grid">
+      <div class="pg-item"><div class="pg-label">Previous</div><div class="pg-value" id="pop-prev">—</div></div>
+      <div class="pg-item"><div class="pg-label">Forecast</div><div class="pg-value" id="pop-fore">—</div></div>
+      <div class="pg-item"><div class="pg-label">Actual</div><div class="pg-value" id="pop-actual">—</div></div>
+    </div>
+    <div class="popup-expectation" id="pop-exp"></div>
+    <div class="popup-analysis" id="pop-analysis"></div>
+    <button style="width:100%;padding:9px;background:#1a1a2a;border:1px solid #333;color:#60a5fa;border-radius:8px;cursor:pointer;font-size:13px;" onclick="openVideoModal()">📺 Watch Live Coverage</button>
+  </div>
+</div>
+
+<!-- VIDEO MODAL -->
+<div id="video-modal" style="display:none;flex-direction:column;">
+  <div class="vm-box">
+    <div class="vm-header">
+      <span class="vm-title">📺 Live Bloomberg / Reuters Coverage</span>
+      <button class="vm-close" onclick="closeVideoModal()">×</button>
+    </div>
+    <iframe id="yt-frame" src="" allow="autoplay;encrypted-media" allowfullscreen></iframe>
+    <div class="vm-news-info">
+      <div class="vm-news-title" id="vm-event-name"></div>
+      <div class="vm-news-meta" id="vm-event-meta"></div>
+    </div>
+  </div>
+  <div class="vm-disclaimer">This stream is provided by Bloomberg/Reuters via YouTube. Video content is live and independent of this simulator.</div>
+</div>
+
+<script>
+// ============================================================
+// CONFIG
+// ============================================================
+// Twelvedata's datetime field is returned in the EXCHANGE's local timezone
+// by default (e.g. America/New_York for FX) with NO "Z"/offset marker — it is
+// NOT UTC unless you explicitly ask for it. We now pass &timezone=UTC on every
+// time_series request (see loadChartData), so by the time a string reaches
+// this parser it is guaranteed to already be UTC — we just need to mark it as
+// such so JS doesn't parse it as the browser's local time.
+function parseTwelveDataDatetime(str) {
+  if (!str) return new Date(NaN);
+  const s = str.toString().trim();
+  // If it already has a zone marker, trust it
+  if (/[Zz]|[+-]\d{2}:?\d{2}$/.test(s)) return new Date(s);
+  // No zone marker — Twelvedata forex/crypto returns UTC, append Z
+  return new Date(s.replace(' ', 'T') + 'Z');
+}
+
+function parseApiUTC(str) {
+  if (!str) return new Date(NaN);
+  const s = str.toString().trim();
+  if (/[Zz]|[+-]\d{2}:?\d{2}$/.test(s)) return new Date(s);
+  return new Date(s.replace(' ', 'T') + 'Z');
+}
+
+const PAIRS = [
+  // Forex Majors
+  'EUR/USD','GBP/USD','USD/JPY','AUD/USD','USD/CAD','NZD/USD','USD/CHF',
+  // Forex Minors
+  'EUR/GBP','EUR/JPY','GBP/JPY','EUR/AUD','EUR/CAD','AUD/JPY','GBP/AUD','GBP/CAD','AUD/NZD','CAD/JPY',
+  // Forex Exotics
+  'USD/MXN','USD/ZAR','USD/TRY','USD/SGD','USD/NOK','USD/SEK',
+  // Metals
+  'XAU/USD','XAG/USD','XPT/USD','XPD/USD',
+  // Indices
+  'NAS100','US30','SPX500','DAX40','FTSE100','NKY225','HSI',
+  // Commodities
+  'WTI','BRENT','NATGAS',
+  // Crypto
+  'BTC/USD','ETH/USD','SOL/USD','XRP/USD','BNB/USD','DOGE/USD'
+];
+const TIMEFRAMES = ['1m','5m','15m','1H','4H','1D'];
+let activePair = 'EUR/USD', activeTF = '15m', impactFilter = 'all', activeNewsItem = null;
+
+// Live Bloomberg stream (YouTube live)
+const BLOOMBERG_STREAM = 'https://www.youtube.com/embed/dp8PhLsUcFE?autoplay=1&mute=0';
+const REUTERS_STREAM   = 'https://www.youtube.com/embed/9Auq9mYxFEE?autoplay=1&mute=0';
+
+// ============================================================
+// REAL FOREX CALENDAR — Live fetch with fallback
+// ============================================================
+
+// Currency flag map
+const CURRENCY_FLAGS = {
+  USD:'🇺🇸',EUR:'🇪🇺',GBP:'🇬🇧',JPY:'🇯🇵',AUD:'🇦🇺',CAD:'🇨🇦',
+  NZD:'🇳🇿',CHF:'🇨🇭',CNY:'🇨🇳',CNH:'🇨🇳',SEK:'🇸🇪',NOK:'🇳🇴',
+  MXN:'🇲🇽',ZAR:'🇿🇦',TRY:'🇹🇷',SGD:'🇸🇬',HKD:'🇭🇰',KRW:'🇰🇷',
+  BTC:'₿',ETH:'Ξ',ALL:'🌍'
+};
+
+// Affected pairs by currency
+const CURRENCY_PAIRS = {
+  USD:['EUR/USD','GBP/USD','USD/JPY','XAU/USD','NAS100','US30'],
+  EUR:['EUR/USD','EUR/JPY','EUR/GBP','EUR/AUD'],
+  GBP:['GBP/USD','GBP/JPY','EUR/GBP','GBP/AUD'],
+  JPY:['USD/JPY','GBP/JPY','EUR/JPY','AUD/JPY'],
+  AUD:['AUD/USD','AUD/JPY','AUD/NZD','EUR/AUD'],
+  CAD:['USD/CAD','CAD/JPY','GBP/CAD'],
+  NZD:['NZD/USD','AUD/NZD','NZD/JPY'],
+  CHF:['USD/CHF','EUR/CHF','GBP/CHF'],
+  CNY:['USD/CNH']
+};
+
+// Analysis templates by event keyword
+function getAnalysis(title, currency, impact) {
+  const t = title.toLowerCase();
+  if (t.includes('nfp') || t.includes('non-farm') || t.includes('nonfarm'))
+    return 'NFP is the most market-moving USD event. A beat causes USD strength and EUR/USD sell-off. A miss weakens USD and rallies gold. Expect 50-100 pip moves within seconds of release.';
+  if (t.includes('cpi') || t.includes('inflation'))
+    return `${currency} CPI data directly impacts central bank rate expectations. Above forecast = hawkish pressure = ${currency} strength. Below forecast = dovish = ${currency} weakness. Major volatility event.`;
+  if (t.includes('gdp'))
+    return `GDP measures economic output. Strong growth → ${currency} bullish, rate hike expectations rise. Weak GDP → ${currency} bearish. Watch for revision vs initial estimates.`;
+  if (t.includes('rate') || t.includes('interest') || t.includes('boe') || t.includes('fomc') || t.includes('ecb') || t.includes('rba') || t.includes('boj') || t.includes('rbnz'))
+    return `Central bank rate decision. Hold with hawkish guidance → currency strengthens. Cut or dovish tone → sells off. Vote split and statement wording are key. Extreme volatility possible.`;
+  if (t.includes('pmi'))
+    return `PMI above 50 = expansion, below 50 = contraction. ${currency} reacts to deviation from forecast. Manufacturing PMI impacts risk sentiment across correlated pairs.`;
+  if (t.includes('employment') || t.includes('jobs') || t.includes('unemployment') || t.includes('payroll'))
+    return `Employment data is a key economic health indicator. Strong jobs = ${currency} bullish. Weak jobs = ${currency} bearish. Correlates with central bank policy expectations.`;
+  if (t.includes('retail sales'))
+    return `Retail Sales reflects consumer spending strength. Beat = ${currency} bullish (growth signal). Miss = ${currency} bearish. Often moves pairs 20-40 pips on high impact.`;
+  if (t.includes('trade balance'))
+    return `Trade balance surplus = ${currency} positive long term. Deficit = negative. Short-term moves depend on deviation from forecast. Often moderate impact.`;
+  if (t.includes('speech') || t.includes('testimony') || t.includes('press conference') || t.includes('statement'))
+    return `Central banker speeches carry high uncertainty. Hawkish language (inflation concern, rate hike bias) = ${currency} bullish. Dovish language (growth concern, cut bias) = ${currency} bearish. Listen for key phrases.`;
+  if (t.includes('pce'))
+    return `PCE is the Fed\'s preferred inflation measure. Core PCE above 2% target → USD hawkish pressure. Below target → dovish. Directly impacts FOMC rate path expectations.`;
+  if (t.includes('ism'))
+    return `ISM data measures business activity. Above 50 = expansion → ${currency} bullish. Below 50 = contraction → ${currency} bearish. New orders sub-index is particularly watched.`;
+  if (impact === 'high')
+    return `High impact ${currency} event. Significant deviation from forecast will move ${currency} pairs sharply. Watch spread widening ahead of release and prepare for fast price action.`;
+  if (impact === 'med')
+    return `Medium impact ${currency} data. Moderate volatility expected. Pairs like ${(CURRENCY_PAIRS[currency]||['EUR/USD'])[0]} will react to significant surprises.`;
+  return `Low impact ${currency} release. Minor market reaction expected unless dramatically off forecast. Keep positions small around this event.`;
+}
+
+function mapImpact(raw) {
+  if (!raw) return 'low';
+  const r = raw.toString().toLowerCase();
+  if (r === 'high' || r === '3' || r === 'red') return 'high';
+  if (r === 'medium' || r === 'moderate' || r === '2' || r === 'orange' || r === 'yellow') return 'med';
+  return 'low';
+}
+
+// Finnhub 2-letter country code → currency code
+const COUNTRY_TO_CURRENCY = {
+  US:'USD', EU:'EUR', DE:'EUR', FR:'EUR', IT:'EUR', ES:'EUR', NL:'EUR',
+  GB:'GBP', UK:'GBP', JP:'JPY', AU:'AUD', CA:'CAD', NZ:'NZD', CH:'CHF',
+  CN:'CNY', SE:'SEK', NO:'NOK', MX:'MXN', ZA:'ZAR', TR:'TRY', SG:'SGD',
+  HK:'HKD', KR:'KRW'
+};
+
+let events = [];
+let selectedEvent = null;
+// Manual overrides for which events are "included" in the next simulation.
+// Key = event id, value = true (force include) or false (force exclude).
+// Anything NOT in this map falls back to the auto-inclusion rule (see getActiveNewsEvents).
+let simIncludeOverrides = {};
+let calendarFetched = false;
+let calendarSource = 'live'; // 'live' | 'cached' | 'offline'
+
+// Pool of Finnhub keys — rotated automatically when one hits its rate limit,
+// so the app effectively gets N x the free-tier quota instead of 1x.
+const FINNHUB_API_KEYS = [
+  'd9be8f9r01qmk4glf3f0d9be8f9r01qmk4glf3fg',
+  'd9bpiopr01ql2jmsvhvgd9bpiopr01ql2jmsvi00',
+  'd9bpjd9r01ql2jmsvkl0d9bpjd9r01ql2jmsvklg',
+  'd9bpjq1r01ql2jmsvmagd9bpjq1r01ql2jmsvmb0',
+  'd9bpknpr01ql2jmsvpsgd9bpknpr01ql2jmsvpt0',
+  'd9bpnr9r01ql2jmt0480d9bpnr9r01ql2jmt048g',
+];
+let fhKeyIdx = 0;
+function currentFhKey() { return FINNHUB_API_KEYS[fhKeyIdx]; }
+function rotateFhKey() { fhKeyIdx = (fhKeyIdx + 1) % FINNHUB_API_KEYS.length; return currentFhKey(); }
+
+// Fetch helper that rotates through the Finnhub key pool on 429s / auth errors
+// instead of just failing on the first exhausted key.
+async function finnhubFetch(urlBuilder) {
+  let lastErr = null;
+  for (let attempt = 0; attempt < FINNHUB_API_KEYS.length; attempt++) {
+    const key = currentFhKey();
+    try {
+      const res = await fetch(urlBuilder(key));
+      if (res.status === 429 || res.status === 401 || res.status === 403) {
+        console.warn(`Finnhub key …${key.slice(-6)} rate-limited/rejected (HTTP ${res.status}), rotating`);
+        lastErr = new Error(`Finnhub HTTP ${res.status}`);
+        rotateFhKey();
+        continue;
+      }
+      return await res.json();
+    } catch (e) {
+      lastErr = e;
+      rotateFhKey();
+    }
+  }
+  throw lastErr || new Error('All Finnhub API keys exhausted');
+}
+
+const FCS_API_KEY = 'yTl4EpAg4NNFbrV1Mc1bl';
+
+// FCS country/currency strings vary (sometimes full currency code, sometimes country name) —
+// normalize whatever comes back to our 3-letter currency codes.
+const FCS_COUNTRY_NORMALIZE = {
+  'USD':'USD','US':'USD','UNITED STATES':'USD',
+  'EUR':'EUR','EUROZONE':'EUR','EU':'EUR',
+  'GBP':'GBP','UK':'GBP','UNITED KINGDOM':'GBP',
+  'JPY':'JPY','JAPAN':'JPY',
+  'AUD':'AUD','AUSTRALIA':'AUD',
+  'CAD':'CAD','CANADA':'CAD',
+  'NZD':'NZD','NEW ZEALAND':'NZD',
+  'CHF':'CHF','SWITZERLAND':'CHF',
+  'CNY':'CNY','CHINA':'CNY'
+};
+
+function normalizeFcsCurrency(raw) {
+  if (!raw) return 'USD';
+  const key = raw.toString().trim().toUpperCase();
+  return FCS_COUNTRY_NORMALIZE[key] || (key.length === 3 ? key : 'USD');
+}
+
+function mapFcsVolatility(raw) {
+  if (!raw) return 'low';
+  const r = raw.toString().toLowerCase();
+  if (r.includes('3') || r.includes('high')) return 'high';
+  if (r.includes('2') || r.includes('med')) return 'med';
+  return 'low';
+}
+
+function mapFcsImportance(raw) {
+  const n = parseInt(raw, 10);
+  if (n === 3) return 'high';
+  if (n === 2) return 'med';
+  return 'low'; // covers 1, 0, and anything unexpected
+}
+
+// Override raw API impact scores for well-known event types, matching the
+// standard BabyPips/ForexFactory red/orange/yellow convention that traders expect.
+function getKnownImpactOverride(title) {
+  const t = title.toLowerCase();
+  const HIGH_KEYWORDS = [
+    'non-farm', 'nonfarm', 'nfp', 'cpi', 'interest rate decision', 'rate decision',
+    'fomc', 'fed interest rate', 'federal funds rate', 'gdp', 'unemployment rate',
+    'employment change', 'ecb press conference', 'ecb interest rate', 'boe interest rate',
+    'boj interest rate', 'rba interest rate', 'rbnz interest rate', 'ppi',
+    'retail sales', 'core cpi', 'core pce', 'pce price index', 'jackson hole',
+    'press conference', 'monetary policy statement', 'monetary policy report'
+  ];
+  const MED_KEYWORDS = [
+    'pmi', 'ism', 'jobless claims', 'consumer confidence', 'consumer sentiment',
+    'trade balance', 'durable goods', 'housing starts', 'building permits',
+    'industrial production', 'factory orders', 'jolts', 'adp'
+  ];
+  if (HIGH_KEYWORDS.some(k => t.includes(k))) return 'high';
+  if (MED_KEYWORDS.some(k => t.includes(k))) return 'med';
+  return null; // no override — trust the raw API value
+}
+
+async function fetchFcsCalendar() {
+  const url = `https://fcsapi.com/api-v3/forex/economy_cal?access_key=${FCS_API_KEY}`;
+  const res = await fetch(url);
+  const json = await res.json();
+  if (!json || json.status !== true || !Array.isArray(json.response) || !json.response.length) {
+    throw new Error('FCS returned no usable events: ' + JSON.stringify(json).slice(0,200));
+  }
+
+  const now = new Date();
+  const windowStart = new Date(now); windowStart.setUTCHours(0,0,0,0);
+  const windowEnd = new Date(now); windowEnd.setUTCDate(windowEnd.getUTCDate()+1); windowEnd.setUTCHours(23,59,59,999);
+
+  const mapped = json.response
+    .filter(ev => (ev.indicator || '').toLowerCase() !== 'holidays') // exclude bank holidays, not real market-moving events
+    .map((ev, i) => {
+      // FCS returns a single combined "YYYY-MM-DD HH:MM:SS" field, treat as UTC
+      const evTime = parseApiUTC(ev.date || '');
+      const currency = normalizeFcsCurrency(ev.currency || ev.country);
+      const title = ev.title || 'Economic Event';
+      const impact = getKnownImpactOverride(title) || mapFcsImportance(ev.importance);
+      const prev = ev.previous;
+      const fore = ev.forecast;
+      const act  = ev.actual;
+      const hasActual = act !== null && act !== undefined && act !== '';
+      return {
+        id: 'fcs_' + (ev.id || i),
+        time: evTime,
+        currency,
+        flag: CURRENCY_FLAGS[currency] || '🌍',
+        event: title,
+        impact,
+        previous: prev != null && prev !== '' ? String(prev) + (ev.unit||'') : null,
+        forecast: fore != null && fore !== '' ? String(fore) + (ev.unit||'') : null,
+        actual: hasActual ? String(act) + (ev.unit||'') : null,
+        outcome: hasActual && (fore || prev)
+          ? (parseFloat(act) > parseFloat(fore||prev) ? 'beat' : parseFloat(act) < parseFloat(fore||prev) ? 'miss' : 'inline')
+          : null,
+        pairs: CURRENCY_PAIRS[currency] || ['EUR/USD'],
+        analysis: getAnalysis(title, currency, impact),
+        bullishPair: (CURRENCY_PAIRS[currency]||['EUR/USD'])[0],
+        bearishPair: (CURRENCY_PAIRS[currency]||['EUR/USD'])[1]||null,
+        _live: true,
+      };
+    });
+
+  const inWindow = mapped.filter(ev => !isNaN(ev.time.getTime()) && ev.time >= windowStart && ev.time <= windowEnd)
+    .sort((a,b)=>a.time-b.time);
+
+  if (!inWindow.length) {
+    console.log('FCS parsed but none in window. Sample parsed times:', mapped.slice(0,3).map(e=>({title:e.event, parsed:e.time.toString()})));
+    throw new Error('FCS events present but none fall in today/tomorrow window (see console for parsed sample)');
+  }
+  return inWindow;
+}
+
+async function fetchRealCalendar() {
+  document.getElementById('news-list').innerHTML = '<div style="padding:20px;color:#666;font-size:12px;text-align:center;">⏳ Loading live calendar…</div>';
+
+  // Try 1: FCS API (primary — built for client-side/browser use)
+  try {
+    const fcsEvents = await fetchFcsCalendar();
+    events = fcsEvents;
+    calendarFetched = true;
+    calendarSource = 'live';
+    try {
+      const now = new Date();
+      const todayStr = `${now.getUTCFullYear()}-${String(now.getUTCMonth()+1).padStart(2,'0')}-${String(now.getUTCDate()).padStart(2,'0')}`;
+      localStorage.setItem('fx_calendar_cache', JSON.stringify({ fetchedAt: Date.now(), date: todayStr, events: events.map(e=>({...e,time:e.time.toISOString()})) }));
+    } catch(e){}
+    renderNews();
+    return;
+  } catch(e) { console.warn('FCS calendar failed:', e.message); }
+
+  // Try 2: Finnhub (secondary)
+  try {
+    const now = new Date();
+    const yyyy = now.getUTCFullYear();
+    const mm   = String(now.getUTCMonth()+1).padStart(2,'0');
+    const dd   = String(now.getUTCDate()).padStart(2,'0');
+    const tomorrow = new Date(now); tomorrow.setUTCDate(now.getUTCDate()+1);
+    const tm = String(tomorrow.getUTCMonth()+1).padStart(2,'0');
+    const td = String(tomorrow.getUTCDate()).padStart(2,'0');
+    const fromStr = `${yyyy}-${mm}-${dd}`;
+    const toStr = `${tomorrow.getUTCFullYear()}-${tm}-${td}`;
+
+    const json = await finnhubFetch(key =>
+      `https://finnhub.io/api/v1/calendar/economic?from=${fromStr}&to=${toStr}&token=${key}`
+    );
+
+    if (json && Array.isArray(json.economicCalendar) && json.economicCalendar.length) {
+      events = json.economicCalendar.map((ev, i) => {
+        const evTime = parseApiUTC(ev.time); // Finnhub returns "YYYY-MM-DD HH:MM:SS" (UTC, no marker)
+        const country = (ev.country || 'US').toUpperCase();
+        const currency = COUNTRY_TO_CURRENCY[country] || country;
+        const title = ev.event || 'Economic Event';
+        const impact = getKnownImpactOverride(title) || mapImpact(ev.impact);
+        const hasActual = ev.actual !== null && ev.actual !== undefined && ev.actual !== '';
+        const forecastVal = (ev.estimate !== null && ev.estimate !== undefined) ? ev.estimate : ev.prev;
+        return {
+          id: 'live_' + i,
+          time: evTime,
+          currency,
+          flag: CURRENCY_FLAGS[currency] || '🌍',
+          event: title,
+          impact,
+          previous: (ev.prev !== null && ev.prev !== undefined) ? String(ev.prev) + (ev.unit||'') : null,
+          forecast: (ev.estimate !== null && ev.estimate !== undefined) ? String(ev.estimate) + (ev.unit||'') : null,
+          actual: hasActual ? String(ev.actual) + (ev.unit||'') : null,
+          outcome: hasActual
+            ? (parseFloat(ev.actual) > parseFloat(forecastVal||'0') ? 'beat' : parseFloat(ev.actual) < parseFloat(forecastVal||'0') ? 'miss' : 'inline')
+            : null,
+          pairs: CURRENCY_PAIRS[currency] || ['EUR/USD'],
+          analysis: getAnalysis(title, currency, impact),
+          bullishPair: (CURRENCY_PAIRS[currency]||['EUR/USD'])[0],
+          bearishPair: (CURRENCY_PAIRS[currency]||['EUR/USD'])[1]||null,
+          _live: true,
+        };
+      }).sort((a,b)=>a.time-b.time);
+
+      calendarFetched = true;
+      calendarSource = 'live';
+      try { localStorage.setItem('fx_calendar_cache', JSON.stringify({ fetchedAt: Date.now(), date: fromStr, events: events.map(e=>({...e,time:e.time.toISOString()})) })); } catch(e){}
+      renderNews();
+      return;
+    }
+    console.warn('Finnhub calendar returned no events for this window.');
+  } catch(e) { console.warn('Finnhub calendar fetch failed:', e); }
+
+  // Try cache, but only if it's from today and less than 2 hours old
+  try {
+    const cached = JSON.parse(localStorage.getItem('fx_calendar_cache'));
+    const now = new Date();
+    const todayStr = `${now.getUTCFullYear()}-${String(now.getUTCMonth()+1).padStart(2,'0')}-${String(now.getUTCDate()).padStart(2,'0')}`;
+    const isFresh = cached && cached.fetchedAt && (Date.now() - cached.fetchedAt) < 2*60*60*1000;
+    if (cached && cached.events && cached.events.length && cached.date === todayStr && isFresh) {
+      events = cached.events.map(e=>({...e, time:new Date(e.time)}));
+      calendarSource = 'cached';
+      renderNews();
+      console.log('Using cached calendar (fresh, same-day)');
+      return;
+    }
+  } catch(e){}
+
+  // Final fallback — clearly marked as simulated, not real data
+  events = generateFallbackCalendar();
+  calendarSource = 'offline';
+  renderNews();
+}
+
+function generateFallbackCalendar() {
+  const now = new Date();
+  function t(h, m=0) { const d=new Date(now); d.setUTCHours(h,m,0,0); return d; }
+  const dow = now.getUTCDay(); // 0=Sun,1=Mon,...5=Fri
+
+  // NOTE: these are placeholder events only used if the live Finnhub calendar
+  // fetch fails AND there's no fresh same-day cache. They are labeled
+  // "[SIMULATED]" in the title so they can never be mistaken for real news.
+  // Always-present events
+  const base = [
+    { id:'fb1', time:t(12,30), currency:'USD', flag:'🇺🇸', event:'US Initial Jobless Claims', impact:'med',
+      previous:'215K', forecast:'218K', actual:null, pairs:['EUR/USD','USD/JPY'],
+      analysis:getAnalysis('jobless claims','USD','med'), bullishPair:'USD/JPY', bearishPair:'EUR/USD' },
+    { id:'fb2', time:t(9,0), currency:'EUR', flag:'🇪🇺', event:'Eurozone Sentix Investor Confidence', impact:'low',
+      previous:'-19.5', forecast:'-17.0', actual:null, pairs:['EUR/USD','EUR/JPY'],
+      analysis:getAnalysis('sentiment','EUR','low'), bullishPair:'EUR/USD', bearishPair:null },
+    { id:'fb3', time:t(14,0), currency:'USD', flag:'🇺🇸', event:'US ISM Services PMI', impact:'high',
+      previous:'53.5', forecast:'53.0', actual:null, pairs:['EUR/USD','USD/JPY','XAU/USD'],
+      analysis:getAnalysis('ism','USD','high'), bullishPair:'USD/JPY', bearishPair:'XAU/USD' },
+  ];
+
+  // Day-specific events
+  if (dow===1) base.push(
+    { id:'fb4', time:t(8,55), currency:'EUR', flag:'🇪🇺', event:'German Manufacturing PMI (Final)', impact:'med', previous:'48.3', forecast:'48.5', actual:null, pairs:['EUR/USD','EUR/GBP'], analysis:getAnalysis('pmi','EUR','med'), bullishPair:'EUR/USD', bearishPair:null },
+    { id:'fb5', time:t(10,0), currency:'GBP', flag:'🇬🇧', event:'UK Construction PMI', impact:'low', previous:'50.2', forecast:'50.5', actual:null, pairs:['GBP/USD'], analysis:getAnalysis('pmi','GBP','low'), bullishPair:'GBP/USD', bearishPair:null }
+  );
+  if (dow===2) base.push(
+    { id:'fb4', time:t(9,30), currency:'GBP', flag:'🇬🇧', event:'UK Services PMI', impact:'high', previous:'52.5', forecast:'53.0', actual:null, pairs:['GBP/USD','GBP/JPY'], analysis:getAnalysis('pmi','GBP','high'), bullishPair:'GBP/USD', bearishPair:'EUR/GBP' },
+    { id:'fb5', time:t(15,0), currency:'USD', flag:'🇺🇸', event:'US JOLTS Job Openings', impact:'med', previous:'8.76M', forecast:'8.70M', actual:null, pairs:['EUR/USD','USD/JPY'], analysis:getAnalysis('employment','USD','med'), bullishPair:'USD/JPY', bearishPair:'EUR/USD' }
+  );
+  if (dow===3) base.push(
+    { id:'fb4', time:t(12,15), currency:'USD', flag:'🇺🇸', event:'US ADP Non-Farm Employment', impact:'high', previous:'145K', forecast:'155K', actual:null, pairs:['EUR/USD','USD/JPY','XAU/USD'], analysis:getAnalysis('employment','USD','high'), bullishPair:'USD/JPY', bearishPair:'XAU/USD' },
+    { id:'fb5', time:t(18,0), currency:'USD', flag:'🇺🇸', event:'FOMC Meeting Minutes', impact:'high', previous:'—', forecast:'—', actual:null, pairs:['EUR/USD','USD/JPY','XAU/USD','NAS100'], analysis:getAnalysis('fomc','USD','high'), bullishPair:'USD/JPY', bearishPair:'XAU/USD' }
+  );
+  if (dow===4) base.push(
+    { id:'fb4', time:t(12,30), currency:'USD', flag:'🇺🇸', event:'US Retail Sales (MoM)', impact:'high', previous:'0.2%', forecast:'0.4%', actual:null, pairs:['EUR/USD','USD/JPY','GBP/USD'], analysis:getAnalysis('retail sales','USD','high'), bullishPair:'USD/JPY', bearishPair:'EUR/USD' },
+    { id:'fb5', time:t(8,0), currency:'GBP', flag:'🇬🇧', event:'Bank of England MPC Meeting Minutes', impact:'high', previous:'—', forecast:'—', actual:null, pairs:['GBP/USD','GBP/JPY','EUR/GBP'], analysis:getAnalysis('boe','GBP','high'), bullishPair:'GBP/USD', bearishPair:'EUR/GBP' }
+  );
+  if (dow===5) base.push(
+    { id:'fb4', time:t(12,30), currency:'USD', flag:'🇺🇸', event:'Non-Farm Payrolls (NFP)', impact:'high', previous:'151K', forecast:'165K', actual:null, pairs:['EUR/USD','GBP/USD','USD/JPY','XAU/USD'], analysis:getAnalysis('non-farm','USD','high'), bullishPair:'USD/JPY', bearishPair:'EUR/USD' },
+    { id:'fb5', time:t(14,0), currency:'USD', flag:'🇺🇸', event:'University of Michigan Consumer Sentiment', impact:'med', previous:'64.7', forecast:'66.0', actual:null, pairs:['EUR/USD','USD/JPY'], analysis:getAnalysis('consumer','USD','med'), bullishPair:'USD/JPY', bearishPair:'EUR/USD' }
+  );
+
+  return base.map(ev => ({ ...ev, event: '[SIMULATED] ' + ev.event })).sort((a,b)=>a.time-b.time);
+}
+
+// ============================================================
+// WAT (Nigeria / West Africa Time, UTC+1, no DST) DISPLAY HELPERS
+// WAT = UTC+1 always (no daylight saving).
+// We compute WAT by taking the UTC milliseconds and adding 1 hour.
+// We use getUTC* methods on a shifted Date so the result is timezone-independent
+// regardless of what timezone the user's browser/OS is set to.
+// ============================================================
+
+// Returns a Date object shifted to WAT — use getUTC* methods to read it
+function getWAT(date) {
+  // WAT = UTC + 1h. Shift the timestamp so getUTCHours() reads the WAT hour.
+  return new Date(date.getTime() + 60 * 60 * 1000);
+}
+
+function formatWATTime(date, withSeconds=false) {
+  const w = getWAT(date);
+  const hh = String(w.getUTCHours()).padStart(2,'0');
+  const mm = String(w.getUTCMinutes()).padStart(2,'0');
+  if (withSeconds) return `${hh}:${mm}:${String(w.getUTCSeconds()).padStart(2,'0')} WAT`;
+  return `${hh}:${mm} WAT`;
+}
+
+// Sanity check on load — log the offset so we can verify
+(function() {
+  const now = new Date();
+  const utcH = now.getUTCHours();
+  const watH = getWAT(now).getUTCHours();
+  const browserLocalH = now.getHours();
+  console.log(`[WAT INIT] UTC hour: ${utcH} | WAT hour (should be UTC+1): ${watH} | Browser local hour: ${browserLocalH}`);
+  if (browserLocalH === watH) {
+    console.log('[WAT INIT] ✅ Browser is set to WAT — times will match.');
+  } else {
+    console.log(`[WAT INIT] ℹ️ Browser timezone differs from WAT by ${browserLocalH - watH}h — display still forced to WAT correctly.`);
+  }
+})();
+
+const WAT_MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+const WAT_DAYS = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+
+function formatWATDateShort(date) {
+  const w = getWAT(date);
+  return `${String(w.getUTCDate()).padStart(2,'0')} ${WAT_MONTHS[w.getUTCMonth()]}`;
+}
+
+function formatWATWeekdayDate(date) {
+  const w = getWAT(date);
+  return `${WAT_DAYS[w.getUTCDay()]}, ${w.getUTCDate()} ${WAT_MONTHS[w.getUTCMonth()]} ${w.getUTCFullYear()}`;
+}
+
+function formatWATCompact(date) {
+  const w = getWAT(date);
+  const hh = String(w.getUTCHours()).padStart(2,'0');
+  const mm = String(w.getUTCMinutes()).padStart(2,'0');
+  return `${String(w.getUTCDate()).padStart(2,'0')} ${WAT_MONTHS[w.getUTCMonth()]} ${hh}:${mm} WAT`;
+}
+
+// ============================================================
+// CLOCK + SESSION
+// ============================================================
+function getSession(utcHour) {
+  if (utcHour >= 22 || utcHour < 7) return { name:'Asian Session', cls:'session-asian' };
+  if (utcHour >= 7 && utcHour < 8)  return { name:'London Open', cls:'session-london' };
+  if (utcHour >= 8 && utcHour < 12) return { name:'London Session', cls:'session-london' };
+  if (utcHour >= 12 && utcHour < 13) return { name:'London/NY Overlap', cls:'session-overlap' };
+  if (utcHour >= 13 && utcHour < 17) return { name:'New York Session', cls:'session-ny' };
+  return { name:'NY Close / Pre-Asian', cls:'session-asian' };
+}
+
+function updateClock() {
+  const now = new Date();
+  document.getElementById('clock').textContent = formatWATTime(now, true);
+  const h = now.getUTCHours();
+  const sess = getSession(h);
+  const badge = document.getElementById('session-badge');
+  badge.textContent = sess.name;
+  badge.className = 'session-badge ' + sess.cls;
+
+  // Always keep "As of" in sync with real clock
+  updateAsOf();
+
+  // Update countdowns + check for firing events
+  updateCountdowns(now);
+}
+
+function formatCountdown(ms) {
+  if (ms < 0) return 'LIVE';
+  const s = Math.floor(ms/1000);
+  const m = Math.floor(s/60);
+  const h = Math.floor(m/60);
+  if (h > 0) return `${h}h ${m%60}m`;
+  if (m > 0) return `${m}m ${s%60}s`;
+  return `${s}s`;
+}
+
+function updateCountdowns(now) {
+  let nextEvent = null, nextDiff = Infinity;
+  events.forEach(ev => {
+    const diff = ev.time - now;
+    const el = document.getElementById('cnt-' + ev.id);
+    if (el) {
+      if (diff > 0) {
+        el.textContent = formatCountdown(diff);
+        if (diff < nextDiff) { nextDiff = diff; nextEvent = ev; }
+      } else {
+        el.textContent = 'LIVE';
+        // Auto-fire popup when countdown hits 0
+        if (!ev._fired && diff > -5000) {
+          ev._fired = true;
+          simulateActual(ev);
+          fireNewsEvent(ev);
+        }
+      }
+    }
+  });
+  if (nextEvent) {
+    document.getElementById('next-event-label').textContent =
+      `${nextEvent.event} (${nextEvent.currency}) in ${formatCountdown(nextDiff)}`;
+  }
+}
+
+// ============================================================
+// SIMULATE ACTUAL VALUE
+// ============================================================
+function simulateActual(ev) {
+  if (ev.actual) return;
+  const outcomes = ['beat','miss','inline'];
+  const roll = outcomes[Math.floor(Math.random()*3)];
+  if (ev.previous && ev.previous.includes('%')) {
+    const prev = parseFloat(ev.previous);
+    if (roll === 'beat') ev.actual = (prev + (Math.random()*.3+.1)).toFixed(1) + '%';
+    else if (roll === 'miss') ev.actual = (prev - (Math.random()*.3+.1)).toFixed(1) + '%';
+    else ev.actual = ev.forecast || ev.previous;
+    ev.outcome = roll;
+  } else if (ev.previous && ev.previous.includes('K')) {
+    const prev = parseFloat(ev.previous);
+    if (roll === 'beat') ev.actual = (prev + Math.floor(Math.random()*15+5)) + 'K';
+    else if (roll === 'miss') ev.actual = (prev - Math.floor(Math.random()*15+5)) + 'K';
+    else ev.actual = ev.forecast || ev.previous;
+    ev.outcome = roll;
+  } else {
+    ev.actual = ev.forecast || '—';
+    ev.outcome = 'inline';
+  }
+}
+
+// ============================================================
+// RENDER NEWS LIST
+// ============================================================
+function renderNews() {
+  const now = new Date();
+  const today = formatWATWeekdayDate(now);
+  const sourceTag = calendarSource === 'live' ? ' · 🟢 LIVE (Finnhub)' : calendarSource === 'cached' ? ' · 🟡 CACHED' : ' · 🔴 SIMULATED';
+  document.getElementById('news-date').textContent = today + sourceTag;
+
+  const list = document.getElementById('news-list');
+  const filtered = events.filter(ev => impactFilter === 'all' || ev.impact === impactFilter);
+
+  if (!filtered.length) { list.innerHTML = '<div style="padding:20px;color:#555;text-align:center;font-size:13px;">No events match filter</div>'; return; }
+
+  list.innerHTML = filtered.map(ev => {
+    const diff = ev.time - now;
+    const fired = diff < -30000;
+    const timeStr = formatWATTime(ev.time);
+    const impactIcon = ev.impact==='high'?'🔴':ev.impact==='med'?'🟡':'🔵';
+    const included = isEventIncludedInSim(ev, now);
+
+    let actualHtml = '';
+    if (ev.actual) {
+      const cls = ev.outcome==='beat'?'better':ev.outcome==='miss'?'worse':'';
+      actualHtml = `<span class="ni-actual ${cls}">A: ${ev.actual}</span>`;
+    }
+
+    return `<div class="news-item impact-${ev.impact} ${fired?'fired':''} ${included?'auto-included':''}" id="ni-${ev.id}" onclick="selectEvent('${ev.id}')">
+      <div class="ni-top">
+        <span class="ni-time">${timeStr}</span>
+        <span class="ni-countdown" id="cnt-${ev.id}">${diff>0?formatCountdown(diff):'LIVE'}</span>
+      </div>
+      <div class="ni-event">
+        <div class="impact-dot"></div>
+        ${impactIcon} ${ev.event}
+      </div>
+      <div class="ni-meta">
+        <span class="currency-flag">${ev.flag}</span>
+        <span class="currency-tag">${ev.currency}</span>
+        ${ev.forecast?`<span class="ni-forecast">F: ${ev.forecast}</span>`:''}
+        ${ev.previous?`<span class="ni-forecast">P: ${ev.previous}</span>`:''}
+        ${actualHtml}
+      </div>
+      <div class="ni-sim-toggle" onclick="event.stopPropagation()">
+        <input type="checkbox" id="simchk-${ev.id}" ${included?'checked':''} onchange="toggleSimInclude('${ev.id}', this.checked)"/>
+        <label for="simchk-${ev.id}">${included?'included in simulation (auto)':'include in simulation'}</label>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+// ============================================================
+// MULTI-EVENT SIMULATION INCLUSION
+// An event counts toward the simulation if the user has explicitly
+// toggled it on/off (simIncludeOverrides), or — absent an override —
+// if it's a med/high impact event affecting the active pair within
+// roughly ±6h of "now" (i.e. the present-time news cluster).
+// ============================================================
+function isEventIncludedInSim(ev, now) {
+  if (Object.prototype.hasOwnProperty.call(simIncludeOverrides, ev.id)) return simIncludeOverrides[ev.id];
+  const affectsPair = (ev.pairs||[]).includes(activePair);
+  if (!affectsPair) return false;
+  if (ev.impact === 'low') return false;
+  const hoursAway = Math.abs(ev.time - now) / 3600000;
+  return hoursAway <= 6;
+}
+
+function toggleSimInclude(id, checked) {
+  simIncludeOverrides[id] = checked;
+  renderNews();
+}
+
+function getActiveNewsEvents() {
+  const now = new Date();
+  return events.filter(ev => isEventIncludedInSim(ev, now));
+}
+
+// ============================================================
+// SELECT EVENT
+// ============================================================
+function selectEvent(id) {
+  selectedEvent = events.find(e => e.id === id);
+  if (!selectedEvent) return;
+
+  // Highlight
+  document.querySelectorAll('.news-item').forEach(el => el.classList.remove('selected'));
+  const el = document.getElementById('ni-'+id);
+  if (el) el.classList.add('selected');
+
+  // Switch chart to affected pair
+  if (selectedEvent.pairs && selectedEvent.pairs.length) {
+    setPair(selectedEvent.pairs[0]);
+  }
+
+  // Show popup with event info
+  showEventPopup(selectedEvent);
+}
+
+// ============================================================
+// FIRE NEWS EVENT (auto when countdown hits 0)
+// ============================================================
+function fireNewsEvent(ev) {
+  renderNews(); // re-render to show actual
+  const el = document.getElementById('ni-'+ev.id);
+  if (el) { el.classList.add('firing'); el.classList.remove('fired'); }
+  showEventPopup(ev);
+  selectEvent(ev.id);
+}
+
+// ============================================================
+// SHOW EVENT POPUP
+// ============================================================
+function showEventPopup(ev) {
+  document.getElementById('pop-event').textContent = ev.event;
+  document.getElementById('pop-prev').textContent = ev.previous || '—';
+  document.getElementById('pop-fore').textContent = ev.forecast || '—';
+
+  const actualEl = document.getElementById('pop-actual');
+  if (ev.actual) {
+    actualEl.textContent = ev.actual;
+    actualEl.className = 'pg-value ' + (ev.outcome==='beat'?'better':ev.outcome==='miss'?'worse':'');
+  } else {
+    actualEl.textContent = 'Pending';
+    actualEl.className = 'pg-value';
+  }
+
+  // Market expectation
+  const expEl = document.getElementById('pop-exp');
+  if (!ev.actual) {
+    expEl.textContent = '⏳ Awaiting Release';
+    expEl.className = 'popup-expectation exp-neutral';
+  } else if (ev.outcome === 'beat') {
+    expEl.textContent = `📈 ${ev.currency} BULLISH — Beat Forecast`;
+    expEl.className = 'popup-expectation exp-bullish';
+    if (ev.bullishPair) setPair(ev.bullishPair);
+  } else if (ev.outcome === 'miss') {
+    expEl.textContent = `📉 ${ev.currency} BEARISH — Missed Forecast`;
+    expEl.className = 'popup-expectation exp-bearish';
+    if (ev.bearishPair) setPair(ev.bearishPair);
+  } else {
+    expEl.textContent = `➡️ NEUTRAL — In Line With Forecast`;
+    expEl.className = 'popup-expectation exp-neutral';
+  }
+
+  document.getElementById('pop-analysis').textContent = ev.analysis;
+
+  document.getElementById('vm-event-name').textContent = ev.event;
+  document.getElementById('vm-event-meta').textContent = `${ev.flag} ${ev.currency} · Impact: ${ev.impact.toUpperCase()} · ${formatWATTime(ev.time)}`;
+
+  document.getElementById('news-popup').style.display = 'block';
+}
+
+function closePopup() { document.getElementById('news-popup').style.display='none'; }
+
+// ============================================================
+// VIDEO MODAL
+// ============================================================
+function openVideoModal() {
+  const modal = document.getElementById('video-modal');
+  modal.style.display = 'flex';
+  // Pick Bloomberg or Reuters randomly
+  const stream = Math.random() > .5 ? BLOOMBERG_STREAM : REUTERS_STREAM;
+  document.getElementById('yt-frame').src = stream;
+}
+function closeVideoModal() {
+  document.getElementById('video-modal').style.display='none';
+  document.getElementById('yt-frame').src='';
+}
+
+// ============================================================
+// CANVAS CHART ENGINE
+// ============================================================
+const canvas = document.getElementById('main-canvas');
+const ctx = canvas.getContext('2d');
+
+// Chart state
+let historicalCandles = [];   // frozen historical data
+let simCandles = [];          // generated simulation candles
+let allCandles = [];          // historical + sim combined for rendering
+let simActive = false;
+let simDividerIdx = -1;       // index in allCandles where sim begins
+
+// View state
+let viewOffset = 0;           // candles scrolled from right
+let viewScale = 1;            // zoom: candles visible = base / viewScale
+const BASE_VISIBLE = 80;
+let isDragging = false, dragStartX = 0, dragStartOffset = 0;
+let crosshairX = -1, crosshairY = -1;
+let priceUpdateInterval = null;
+
+// Resize canvas to fill container
+function resizeCanvas() {
+  const wrap = document.getElementById('chart-wrap');
+  canvas.width  = wrap.clientWidth;
+  canvas.height = wrap.clientHeight;
+  drawChart();
+}
+
+// ── Decimal places per pair ──
+function getDP(pair) {
+  if (!pair) return 5;
+  if (pair.includes('JPY') || pair === 'XAU/USD' || pair === 'XAG/USD') return 2;
+  if (['BTC/USD','ETH/USD','SOL/USD','XRP/USD','BNB/USD','DOGE/USD',
+       'NAS100','US30','SPX500','DAX40','FTSE100','NKY225','HSI',
+       'WTI','BRENT','NATGAS','XPT/USD','XPD/USD'].includes(pair)) return 2;
+  return 5;
+}
+
+// ── Draw entire chart ──
+function drawChart() {
+  if (!canvas.width) return;
+  const W = canvas.width, H = canvas.height;
+  const dp = getDP(activePair);
+  const candles = allCandles;
+  if (!candles.length) return;
+
+  // Layout
+  const PRICE_W  = 72;
+  const TIME_H   = 22;
+  const chartW   = W - PRICE_W;
+  const chartH   = H - TIME_H;
+
+  // Visible range
+  const visible = Math.max(10, Math.floor(BASE_VISIBLE / viewScale));
+  const endIdx  = Math.max(visible, candles.length - viewOffset);
+  const startIdx = Math.max(0, endIdx - visible);
+  const visibleCandles = candles.slice(startIdx, endIdx);
+
+  if (!visibleCandles.length) return;
+
+  // Price range
+  let minP = Infinity, maxP = -Infinity;
+  visibleCandles.forEach(c => { minP = Math.min(minP, c.low); maxP = Math.max(maxP, c.high); });
+  const pad = (maxP - minP) * 0.08;
+  minP -= pad; maxP += pad;
+  const priceRange = maxP - minP || 1;
+
+  function px(price) { return chartH - ((price - minP) / priceRange) * chartH; }
+  const candleW = chartW / visible;
+  function cx(i) { return (i - startIdx) * candleW + candleW * 0.5; }
+
+  // ── Background ──
+  ctx.clearRect(0, 0, W, H);
+  ctx.fillStyle = '#0d0d0d';
+  ctx.fillRect(0, 0, W, H);
+
+  // ── Session highlight bands ──
+  visibleCandles.forEach((c, i) => {
+    const h = new Date(c.time * 1000).getUTCHours();
+    let col = null;
+    if (h >= 7  && h < 16) col = 'rgba(34,197,94,0.025)';   // London
+    if (h >= 13 && h < 22) col = 'rgba(96,165,250,0.025)';  // NY
+    if (h >= 22 || h < 7)  col = 'rgba(245,158,11,0.020)';  // Asian
+    if (col) { ctx.fillStyle=col; ctx.fillRect(cx(startIdx+i)-candleW/2, 0, candleW, chartH); }
+  });
+
+  // ── Grid ──
+  ctx.strokeStyle = '#161616';
+  ctx.lineWidth   = 1;
+  const gridRows = 6;
+  for (let i = 0; i <= gridRows; i++) {
+    const y = (chartH / gridRows) * i;
+    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(chartW, y); ctx.stroke();
+  }
+  const gridCols = Math.floor(visible / 10);
+  for (let i = 0; i <= gridCols; i++) {
+    const x = (chartW / gridCols) * i;
+    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, chartH); ctx.stroke();
+  }
+
+  // ── Pre-calculate EMAs for full candle array ──
+  // EMA10 (blue) and EMA50 (orange) — same as XM/Exness default MAs
+  const ema10 = [], ema50 = [];
+  const k10 = 2/(10+1), k50 = 2/(50+1);
+  let e10 = null, e50 = null;
+  candles.forEach((c, i) => {
+    if (e10 === null) e10 = c.close; else e10 = c.close * k10 + e10 * (1-k10);
+    if (i < 9) ema10.push(null); else ema10.push(e10);
+    if (e50 === null) e50 = c.close; else e50 = c.close * k50 + e50 * (1-k50);
+    if (i < 49) ema50.push(null); else ema50.push(e50);
+  });
+
+  // ── EMA10 (blue) ──
+  ctx.strokeStyle = '#3b82f6'; ctx.lineWidth = 1.5; ctx.beginPath();
+  let maStarted = false;
+  let ma10LastX = -1, ma10LastY = -1;
+  visibleCandles.forEach((c, i) => {
+    const gi = startIdx + i;
+    const val = ema10[gi];
+    if (val === null || val === undefined) return;
+    const x = cx(startIdx+i), y = px(val);
+    if (!maStarted) { ctx.moveTo(x,y); maStarted=true; } else ctx.lineTo(x,y);
+    ma10LastX = x; ma10LastY = y;
+  });
+  ctx.stroke();
+  if (ma10LastX > 0 && ma10LastX < chartW - 45) {
+    ctx.fillStyle = '#3b82f6'; ctx.font = 'bold 10px sans-serif'; ctx.textAlign = 'left';
+    ctx.fillText('EMA10', ma10LastX + 4, ma10LastY + 4);
+  }
+
+  // ── EMA50 (orange) ──
+  ctx.strokeStyle = '#f59e0b'; ctx.lineWidth = 1.5; ctx.beginPath();
+  maStarted = false;
+  let ma50LastX = -1, ma50LastY = -1;
+  visibleCandles.forEach((c, i) => {
+    const gi = startIdx + i;
+    const val = ema50[gi];
+    if (val === null || val === undefined) return;
+    const x = cx(startIdx+i), y = px(val);
+    if (!maStarted) { ctx.moveTo(x,y); maStarted=true; } else ctx.lineTo(x,y);
+    ma50LastX = x; ma50LastY = y;
+  });
+  ctx.stroke();
+  if (ma50LastX > 0 && ma50LastX < chartW - 45) {
+    ctx.fillStyle = '#f59e0b'; ctx.font = 'bold 10px sans-serif'; ctx.textAlign = 'left';
+    ctx.fillText('EMA50', ma50LastX + 4, ma50LastY - 6);
+  }
+
+  // ── Simulation divider ──
+  if (simActive && simDividerIdx >= startIdx && simDividerIdx < endIdx) {
+    const dx = cx(simDividerIdx);
+    ctx.save();
+    ctx.setLineDash([6,4]);
+    ctx.strokeStyle = '#f59e0b';
+    ctx.lineWidth   = 1.5;
+    ctx.beginPath(); ctx.moveTo(dx,0); ctx.lineTo(dx,chartH); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = '#f59e0b';
+    ctx.font = 'bold 10px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('Simulation Begins', dx, 14);
+    ctx.restore();
+  }
+
+  // ── Candles ──
+  visibleCandles.forEach((c, i) => {
+    const x  = cx(startIdx + i);
+    const isSim = simActive && (startIdx + i) >= simDividerIdx;
+    const isUp = c.close >= c.open;
+    const col = isUp ? '#22c55e' : '#ef4444';
+    const bodyW = Math.max(1, candleW * 0.6);
+
+    // Sim candles slightly transparent
+    ctx.globalAlpha = isSim ? 0.75 : 1;
+
+    // Wick
+    ctx.strokeStyle = col; ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(x, px(c.high)); ctx.lineTo(x, px(c.low)); ctx.stroke();
+
+    // Body
+    const y1 = px(Math.max(c.open, c.close));
+    const y2 = px(Math.min(c.open, c.close));
+    const bh = Math.max(1, y2 - y1);
+    ctx.fillStyle = isUp ? col : col;
+    if (isSim) {
+      ctx.strokeStyle = col; ctx.lineWidth = 1;
+      ctx.strokeRect(x - bodyW/2, y1, bodyW, bh);
+      ctx.fillStyle = col + '44';
+      ctx.fillRect(x - bodyW/2, y1, bodyW, bh);
+    } else {
+      ctx.fillRect(x - bodyW/2, y1, bodyW, bh);
+    }
+    ctx.globalAlpha = 1;
+  });
+
+  // ── Current price line ──
+  const lastC = candles[candles.length-1];
+  if (lastC) {
+    const ly = px(lastC.close);
+    ctx.setLineDash([4,3]);
+    ctx.strokeStyle = '#22c55e44'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(0,ly); ctx.lineTo(chartW,ly); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = '#22c55e'; ctx.fillRect(chartW, ly-9, PRICE_W, 18);
+    ctx.fillStyle = '#000'; ctx.font = `bold 11px sans-serif`; ctx.textAlign = 'center';
+    ctx.fillText(lastC.close.toFixed(dp), chartW + PRICE_W/2, ly+4);
+  }
+
+  // ── Price scale ──
+  ctx.fillStyle = '#0d0d0d';
+  ctx.fillRect(chartW, 0, PRICE_W, chartH);
+  ctx.fillStyle = '#444'; ctx.font = '10px sans-serif'; ctx.textAlign = 'left';
+  for (let i = 0; i <= gridRows; i++) {
+    const price = maxP - (priceRange / gridRows) * i;
+    const y = (chartH / gridRows) * i;
+    ctx.fillText(price.toFixed(dp), chartW + 4, y + 4);
+  }
+
+  // ── Time scale ──
+  ctx.fillStyle = '#0d0d0d';
+  ctx.fillRect(0, chartH, W, TIME_H);
+  ctx.fillStyle = '#444'; ctx.font = '10px sans-serif'; ctx.textAlign = 'center';
+  const timeStep = Math.max(1, Math.floor(visible / 8));
+  // One-time log to verify last candle time vs real time
+  if (candles.length && !drawChart._logged) {
+    drawChart._logged = setTimeout(() => { drawChart._logged = null; }, 5000);
+    const lc = candles[candles.length-1];
+    const lcDate = new Date(lc.time * 1000);
+    const now = new Date();
+    console.log(`[CHART TIME CHECK] Last candle UTC: ${lcDate.toISOString()} | Displays as WAT: ${formatWATTime(lcDate)} | Real WAT now: ${formatWATTime(now, true)}`);
+    // A candle should never be more than a few minutes ahead of real time.
+    // If it is, the API stopped returning true UTC (e.g. timezone=UTC param
+    // dropped/ignored) and we're back to the exchange-local shift bug.
+    if (lcDate.getTime() - now.getTime() > 10*60*1000) {
+      console.error(`[CHART TIME CHECK] ⚠️ Last candle is ${Math.round((lcDate.getTime()-now.getTime())/60000)} min AHEAD of real time — timezone bug is back. Check the timezone=UTC param on the Twelvedata request.`);
+    }
+  }
+  visibleCandles.forEach((c, i) => {
+    if (i % timeStep !== 0) return;
+    const d  = new Date(c.time * 1000);
+    const lbl = activeTF === '1D' || activeTF === '1W'
+      ? formatWATDateShort(d)
+      : formatWATTime(d);
+    ctx.fillText(lbl, cx(startIdx + i), chartH + 14);
+  });
+
+  // ── Crosshair ──
+  if (crosshairX >= 0 && crosshairY >= 0 && crosshairX < chartW && crosshairY < chartH) {
+    ctx.strokeStyle = '#ffffff22'; ctx.lineWidth = 1; ctx.setLineDash([3,3]);
+    ctx.beginPath(); ctx.moveTo(crosshairX,0); ctx.lineTo(crosshairX,chartH); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(0,crosshairY); ctx.lineTo(chartW,crosshairY); ctx.stroke();
+    ctx.setLineDash([]);
+    // Price label
+    const hoverPrice = maxP - (crosshairY / chartH) * priceRange;
+    ctx.fillStyle = '#333'; ctx.fillRect(chartW, crosshairY-9, PRICE_W, 18);
+    ctx.fillStyle = '#e8e8e5'; ctx.font='10px sans-serif'; ctx.textAlign='left';
+    ctx.fillText(hoverPrice.toFixed(dp), chartW+4, crosshairY+4);
+    // OHLC tooltip + full date/time (proves exactly what real moment this candle represents)
+    const hi = Math.floor(crosshairX / candleW);
+    const candleIdx = startIdx + hi;
+    if (candleIdx >= 0 && candleIdx < candles.length) {
+      const hc = candles[candleIdx];
+      const hcDate = new Date(hc.time * 1000);
+      const dateLine = `${formatWATWeekdayDate(hcDate)} — ${formatWATTime(hcDate)}`;
+      ctx.fillStyle = 'rgba(13,13,13,0.92)';
+      ctx.fillRect(6, 4, 320, 36);
+      ctx.fillStyle = '#f59e0b'; ctx.font = 'bold 11px sans-serif'; ctx.textAlign = 'left';
+      ctx.fillText(dateLine, 10, 17);
+      ctx.fillStyle = '#888'; ctx.font = '11px sans-serif';
+      ctx.fillText(`O:${hc.open.toFixed(dp)}  H:${hc.high.toFixed(dp)}  L:${hc.low.toFixed(dp)}  C:${hc.close.toFixed(dp)}`, 10, 33);
+    }
+  }
+}
+
+// ── Mouse events ──
+canvas.addEventListener('mousemove', e => {
+  const r = canvas.getBoundingClientRect();
+  crosshairX = e.clientX - r.left;
+  crosshairY = e.clientY - r.top;
+  if (isDragging) {
+    const delta = e.clientX - dragStartX;
+    const candlesPerPx = BASE_VISIBLE / viewScale / canvas.width;
+    viewOffset = Math.max(0, Math.min(allCandles.length - 10, dragStartOffset + Math.round(delta * candlesPerPx)));
+  }
+  drawChart();
+});
+canvas.addEventListener('mouseleave', () => { crosshairX=-1; crosshairY=-1; drawChart(); });
+canvas.addEventListener('mousedown', e => { isDragging=true; dragStartX=e.clientX; dragStartOffset=viewOffset; });
+window.addEventListener('mouseup', () => { isDragging=false; });
+canvas.addEventListener('wheel', e => {
+  e.preventDefault();
+  viewScale = Math.max(0.3, Math.min(8, viewScale * (e.deltaY > 0 ? 0.9 : 1.1)));
+  drawChart();
+}, { passive:false });
+
+// ── Touch pan ──
+let lastTouchX = 0;
+canvas.addEventListener('touchstart', e => { lastTouchX = e.touches[0].clientX; });
+canvas.addEventListener('touchmove', e => {
+  e.preventDefault();
+  const dx = e.touches[0].clientX - lastTouchX;
+  lastTouchX = e.touches[0].clientX;
+  const cpp = BASE_VISIBLE / viewScale / canvas.width;
+  viewOffset = Math.max(0, Math.min(allCandles.length-10, viewOffset + Math.round(dx*cpp)));
+  drawChart();
+}, { passive:false });
+
+new ResizeObserver(resizeCanvas).observe(document.getElementById('chart-wrap'));
+
+// ============================================================
+// DATA LOADING
+// ============================================================
+const TD_SYMBOL = {
+  'EUR/USD':'EUR/USD','GBP/USD':'GBP/USD','USD/JPY':'USD/JPY','AUD/USD':'AUD/USD',
+  'USD/CAD':'USD/CAD','NZD/USD':'NZD/USD','USD/CHF':'USD/CHF','GBP/JPY':'GBP/JPY',
+  'EUR/JPY':'EUR/JPY','EUR/GBP':'EUR/GBP','EUR/AUD':'EUR/AUD','EUR/CAD':'EUR/CAD',
+  'AUD/JPY':'AUD/JPY','GBP/AUD':'GBP/AUD','GBP/CAD':'GBP/CAD','AUD/NZD':'AUD/NZD',
+  'CAD/JPY':'CAD/JPY','USD/MXN':'USD/MXN','USD/ZAR':'USD/ZAR','USD/TRY':'USD/TRY',
+  'USD/SGD':'USD/SGD','USD/NOK':'USD/NOK','USD/SEK':'USD/SEK',
+  'XAU/USD':'XAU/USD','XAG/USD':'XAG/USD','XPT/USD':'XPT/USD','XPD/USD':'XPD/USD',
+  'NAS100':'NDX','US30':'DJI','SPX500':'SPX','DAX40':'DAX','FTSE100':'FTSE',
+  'NKY225':'N225','HSI':'HSI','WTI':'WTI/USD','BRENT':'BRENT/USD','NATGAS':'NATGAS/USD',
+  'BTC/USD':'BTC/USD','ETH/USD':'ETH/USD','SOL/USD':'SOL/USD','XRP/USD':'XRP/USD',
+  'BNB/USD':'BNB/USD','DOGE/USD':'DOGE/USD'
+};
+const TD_INTERVAL = {'1m':'1min','5m':'5min','15m':'15min','1H':'1h','4H':'4h','1D':'1day'};
+// Pool of TwelveData keys — each free key gets its own 8 req/min, 800 req/day
+// quota, so rotating across them multiplies the effective ceiling by however
+// many keys are in the pool. Still not literally unlimited (no free forex
+// data source is), but in practice removes the bottleneck for this app.
+const TD_API_KEYS = [
+  'ce6295ab2f3445a5a071eda94b9e4c86',
+  '8e9a84207e924881b7b8877c1b82351f',
+  'adef5570e58a480d9e68aa3c450053a4',
+  'fb14efdd8e4e446094bfbb7e24583ac4',
+  'a9674d659a1c458cb8f31f5073b7961a',
+  'f666721d8d6e42339c1c468be0546196',
+];
+let tdKeyIdx = 0;
+function currentTdKey() { return TD_API_KEYS[tdKeyIdx]; }
+function rotateTdKey() { tdKeyIdx = (tdKeyIdx + 1) % TD_API_KEYS.length; return currentTdKey(); }
+
+// TwelveData signals rate-limiting with HTTP 200 + a JSON error body (code 429
+// or 401), not an HTTP error status, so we have to inspect the payload itself.
+function isTdRateLimited(json) {
+  if (!json) return false;
+  if (json.code === 429 || json.code === 401) return true;
+  if (json.status === 'error' && /credit|limit|quota/i.test(json.message || '')) return true;
+  return false;
+}
+
+// Fetch helper that rotates through the TwelveData key pool whenever the
+// current key is rate-limited or rejected, retrying the same request on the
+// next key before giving up.
+async function twelveDataFetch(urlBuilder) {
+  let lastJson = null, lastErr = null;
+  for (let attempt = 0; attempt < TD_API_KEYS.length; attempt++) {
+    const key = currentTdKey();
+    try {
+      const res = await fetch(urlBuilder(key));
+      const json = await res.json();
+      if (isTdRateLimited(json)) {
+        console.warn(`TwelveData key …${key.slice(-6)} rate-limited (${json.message||json.code}), rotating`);
+        lastJson = json;
+        rotateTdKey();
+        continue;
+      }
+      return json;
+    } catch (e) {
+      lastErr = e;
+      rotateTdKey();
+    }
+  }
+  if (lastJson) return lastJson; // let caller's existing error handling deal with it
+  throw lastErr || new Error('All TwelveData API keys exhausted');
+}
+
+const BASE_PRICES = {
+  'EUR/USD':1.1436,'GBP/USD':1.3280,'USD/JPY':147.20,'AUD/USD':0.6450,'USD/CAD':1.3580,
+  'NZD/USD':0.5980,'USD/CHF':0.8820,'GBP/JPY':195.40,'EUR/JPY':168.30,'EUR/GBP':0.8610,
+  'EUR/AUD':1.7730,'EUR/CAD':1.5520,'AUD/JPY':94.90,'GBP/AUD':2.0590,'GBP/CAD':1.8030,
+  'AUD/NZD':1.0790,'CAD/JPY':108.40,'USD/MXN':19.45,'USD/ZAR':18.20,'USD/TRY':38.80,
+  'USD/SGD':1.3150,'USD/NOK':10.28,'USD/SEK':10.15,
+  'XAU/USD':3220.0,'XAG/USD':32.40,'XPT/USD':990.0,'XPD/USD':985.0,
+  'NAS100':19850,'US30':42200,'SPX500':5880,'DAX40':23100,'FTSE100':8650,'NKY225':35800,'HSI':22400,
+  'WTI':68.50,'BRENT':72.30,'NATGAS':3.85,
+  'BTC/USD':84500,'ETH/USD':1980,'SOL/USD':138,'XRP/USD':2.18,'BNB/USD':605,'DOGE/USD':0.172
+};
+const VOLATILITY = {
+  'BTC/USD':0.010,'ETH/USD':0.012,'SOL/USD':0.015,'XRP/USD':0.012,'BNB/USD':0.010,'DOGE/USD':0.018,
+  'XAU/USD':0.004,'XAG/USD':0.006,'XPT/USD':0.005,'XPD/USD':0.006,
+  'NAS100':0.007,'US30':0.005,'SPX500':0.006,'DAX40':0.007,'FTSE100':0.005,'NKY225':0.008,'HSI':0.009,
+  'WTI':0.008,'BRENT':0.007,'NATGAS':0.015,
+  'GBP/JPY':0.005,'EUR/JPY':0.004,'AUD/JPY':0.005,'CAD/JPY':0.004,
+  'USD/MXN':0.006,'USD/ZAR':0.008,'USD/TRY':0.010,
+};
+
+function getVol(pair) { return VOLATILITY[pair] || 0.0018; }
+
+// Fetch a real last-traded price for a pair via Twelvedata's lightweight /price endpoint.
+// Used whenever we need a realistic starting point but the full time_series call failed.
+async function fetchRealLastPrice(pair) {
+  const sym = TD_SYMBOL[pair] || pair;
+  try {
+    const cacheKey = `fx_lastprice_${pair}`;
+    const cached = JSON.parse(localStorage.getItem(cacheKey) || 'null');
+    if (cached && cached.fetchedAt && (Date.now() - cached.fetchedAt) < 60*1000) {
+      return cached.price; // reuse within last 60s, avoid hammering the API
+    }
+    const json = await twelveDataFetch(key => `https://api.twelvedata.com/price?symbol=${sym}&apikey=${key}`);
+    const price = parseFloat(json.price);
+    if (!isNaN(price) && price > 0) {
+      try { localStorage.setItem(cacheKey, JSON.stringify({ price, fetchedAt: Date.now() })); } catch(e){}
+      return price;
+    }
+  } catch(e) { console.warn('Real last-price fetch failed for', pair, e); }
+  return null;
+}
+
+async function loadChartData() {
+  showChartLoading(true);
+  clearInterval(priceUpdateInterval);
+  simActive = false; simCandles = []; simDividerIdx = -1;
+  document.getElementById('sim-disclaimer').style.display='none';
+  document.getElementById('commentary-panel').classList.remove('visible');
+  document.getElementById('btn-reset-sim').style.display='none';
+
+  if (!navigator.onLine) { loadOfflineChart(); return; }
+
+  const sym = TD_SYMBOL[activePair] || 'EUR/USD';
+  const interval = TD_INTERVAL[activeTF] || '15min';
+  // IMPORTANT: Twelvedata's default timezone for time_series is the EXCHANGE's
+  // local timezone (e.g. America/New_York for FX), NOT UTC — and it does NOT
+  // mark that in the datetime string (no "Z", no offset). Our parser was
+  // treating that unmarked NY-local string as if it were UTC, which is what
+  // caused hovered/backtested candles to show clock times that hadn't
+  // happened yet in real life. Explicitly requesting timezone=UTC removes the
+  // ambiguity: every datetime we get back is guaranteed to already be UTC.
+  try {
+    const json = await twelveDataFetch(key =>
+      `https://api.twelvedata.com/time_series?symbol=${sym}&interval=${interval}&outputsize=150&timezone=UTC&apikey=${key}`
+    );
+    if (json.status === 'error' || !json.values) throw new Error(json.message);
+
+    historicalCandles = json.values.map(d=>({
+      time: Math.floor(parseTwelveDataDatetime(d.datetime).getTime()/1000),
+      open:parseFloat(d.open), high:parseFloat(d.high),
+      low:parseFloat(d.low), close:parseFloat(d.close),
+    })).reverse();
+
+    // Cache for offline, stamped with fetch time so we never silently serve very stale data
+    try { localStorage.setItem(`fx_candles_${activePair}_${activeTF}`, JSON.stringify({ fetchedAt: Date.now(), candles: historicalCandles })); } catch(e){}
+
+    allCandles = [...historicalCandles];
+    viewOffset = 0;
+    updatePriceInfo();
+    showChartLoading(false);
+    const srcEl = document.getElementById('chart-source');
+    srcEl.textContent = `🟢 LIVE — Twelvedata (${activeTF})`;
+    srcEl.style.color = '#22c55e';
+    resizeCanvas();
+
+    priceUpdateInterval = setInterval(async () => {
+      try {
+        const j2 = await twelveDataFetch(key =>
+          `https://api.twelvedata.com/time_series?symbol=${sym}&interval=${interval}&outputsize=2&timezone=UTC&apikey=${key}`
+        );
+        if (!j2.values) return;
+        const d = j2.values[0];
+        const nc = { time:Math.floor(parseTwelveDataDatetime(d.datetime).getTime()/1000), open:parseFloat(d.open), high:parseFloat(d.high), low:parseFloat(d.low), close:parseFloat(d.close) };
+        if (historicalCandles.length && nc.time === historicalCandles[historicalCandles.length-1].time)
+          historicalCandles[historicalCandles.length-1] = nc;
+        else historicalCandles.push(nc);
+        if (!simActive) { allCandles = [...historicalCandles]; updatePriceInfo(); drawChart(); }
+        try { localStorage.setItem(`fx_candles_${activePair}_${activeTF}`, JSON.stringify({ fetchedAt: Date.now(), candles: historicalCandles })); } catch(e3){}
+      } catch(e){}
+    }, 30000);
+
+  } catch(e) {
+    console.warn('Twelvedata failed:', e);
+    // Try cache — but only if it's recent enough to still be meaningful (5 min)
+    try {
+      const cached = JSON.parse(localStorage.getItem(`fx_candles_${activePair}_${activeTF}`));
+      const isFresh = cached && cached.fetchedAt && (Date.now() - cached.fetchedAt) < 5*60*1000;
+      if (isFresh && cached.candles && cached.candles.length) {
+        historicalCandles = cached.candles;
+        allCandles=[...historicalCandles];
+        viewOffset=0;
+        updatePriceInfo();
+        showChartLoading(false);
+        const ageSec = Math.round((Date.now()-cached.fetchedAt)/1000);
+        const srcEl = document.getElementById('chart-source');
+        srcEl.textContent = `🟡 CACHED (${ageSec}s old, ${activeTF})`;
+        srcEl.style.color = '#f59e0b';
+        resizeCanvas();
+        return;
+      }
+    } catch(e2){}
+    loadOfflineChart();
+  }
+}
+
+async function loadOfflineChart() {
+  let base = BASE_PRICES[activePair] || 1.0850;
+  let usedRealBase = false;
+  const realPrice = await fetchRealLastPrice(activePair);
+  if (realPrice) { base = realPrice; usedRealBase = true; }
+
+  const tfS  = {'1m':60,'5m':300,'15m':900,'1H':3600,'4H':14400,'1D':86400,'1W':604800}[activeTF]||900;
+  // VOLATILITY table is tuned for ~15-minute bars. Real markets have variance that grows
+  // with time (roughly sqrt(time)), so scale relative to that 15m reference — otherwise
+  // every timeframe looks statistically identical, just with different time labels.
+  const REFERENCE_TF_S = 900;
+  const tfScale = Math.sqrt(tfS / REFERENCE_TF_S);
+  const vol = getVol(activePair) * tfScale;
+
+  const now  = Math.floor(Date.now()/1000);
+  let price  = base;
+  historicalCandles = [];
+  // Simulate a realistic trending + ranging market with structure
+  let trend = 0;
+  for (let i = 149; i >= 0; i--) {
+    trend += (Math.random()-0.48)*0.1;
+    trend = Math.max(-1, Math.min(1, trend));
+    const move = price * vol;
+    const open = price;
+    const close = open + (Math.random()-0.5+trend*0.15)*move;
+    const high  = Math.max(open,close)+Math.random()*move*0.4;
+    const low   = Math.min(open,close)-Math.random()*move*0.4;
+    const dp = getDP(activePair);
+    historicalCandles.push({ time:now-i*tfS, open:+open.toFixed(dp), high:+high.toFixed(dp), low:+low.toFixed(dp), close:+close.toFixed(dp) });
+    price = close;
+  }
+  allCandles = [...historicalCandles];
+  viewOffset = 0;
+  updatePriceInfo();
+  showChartLoading(false);
+  const srcEl = document.getElementById('chart-source');
+  if (usedRealBase) {
+    srcEl.textContent = `🟡 Real last price, simulated candles (${activeTF})`;
+    srcEl.style.color = '#f59e0b';
+  } else {
+    srcEl.textContent = `🔴 SIMULATED — not a real quote (${activeTF})`;
+    srcEl.style.color = '#ef4444';
+  }
+  resizeCanvas();
+
+  // Live tick simulation
+  priceUpdateInterval = setInterval(() => {
+    if (simActive) return;
+    const last = historicalCandles[historicalCandles.length-1];
+    const move = last.close * vol * 0.25;
+    const nc = { time:Math.floor(Date.now()/1000), open:last.open, high:Math.max(last.high, last.close+(Math.random()*move)), low:Math.min(last.low, last.close-(Math.random()*move)), close:+(last.close+(Math.random()-0.48)*move).toFixed(getDP(activePair)) };
+    historicalCandles[historicalCandles.length-1] = nc;
+    allCandles = [...historicalCandles];
+    updatePriceInfo(); drawChart();
+  }, 2000);
+}
+
+function updatePriceInfo() {
+  const tfEl = document.getElementById('chart-tf-label');
+  if (tfEl) tfEl.textContent = `TIMEFRAME: ${activeTF} — ${activePair}`;
+  const candles = allCandles;
+  const last = candles[candles.length-1];
+  const prev = candles[candles.length-2];
+  if (!last) return;
+  const dp = getDP(activePair);
+  const change = last.close - (prev?.close||last.open);
+  const pct = ((change/(prev?.close||last.open))*100).toFixed(2);
+  document.getElementById('chart-price').textContent = last.close.toFixed(dp);
+  const chEl = document.getElementById('chart-change');
+  chEl.textContent = `${change>=0?'+':''}${change.toFixed(dp)} (${change>=0?'+':''}${pct}%)`;
+  chEl.style.color = change>=0?'#22c55e':'#ef4444';
+  // "As of" always = RIGHT NOW from system clock, never from candle timestamp
+  updateAsOf();
+}
+
+function updateAsOf() {
+  const asofEl = document.getElementById('chart-asof');
+  if (!asofEl) return;
+  const now = new Date(); // real system time — never use candle.time here
+  asofEl.textContent = `As of: ${formatWATWeekdayDate(now)}, ${formatWATTime(now, true)}`;
+}
+
+function showChartLoading(show) {
+  document.getElementById('chart-loading').style.display = show?'flex':'none';
+}
+
+function loadChart() { loadChartData(); }
+
+// ============================================================
+// SIMULATION ENGINE
+// ============================================================
+let simHistory = JSON.parse(localStorage.getItem('fx_sim_history')||'[]');
+
+// Rule-based fallback aggregation — used when AI interpretation is off,
+// unavailable (offline / fetch blocked), or for non-Automatic scenarios.
+// Combines every currently-included news event (see getActiveNewsEvents)
+// into one net bias + volatility multiplier instead of looking at a single event.
+function aggregateNewsBias(eventList, pair) {
+  if (!eventList.length) return { bias: 0, volMult: 1 };
+  const impactWeight = { high: 3, med: 1.5, low: 0.7 };
+  let biasSum = 0, weightSum = 0, volMult = 1;
+  eventList.forEach(ev => {
+    const w = impactWeight[ev.impact] || 1;
+    volMult = Math.max(volMult, w); // strongest single event sets the vol floor
+    let b = 0;
+    if (ev.outcome === 'beat') b = ev.bullishPair === pair ? 1 : ev.bearishPair === pair ? -0.5 : 0.3;
+    else if (ev.outcome === 'miss') b = ev.bearishPair === pair ? -1 : ev.bullishPair === pair ? 0.5 : -0.3;
+    biasSum += b * w;
+    weightSum += w;
+  });
+  // Multiple simultaneous events widen volatility further (conflicting/compounding releases)
+  volMult *= 1 + Math.min(0.6, (eventList.length - 1) * 0.18);
+  const bias = weightSum ? Math.max(-1, Math.min(1, biasSum / weightSum)) : 0;
+  return { bias, volMult };
+}
+
+// ── AI-driven interpretation for "Automatic" ──
+// Sends the currently-included news events (headline, currency, forecast vs
+// actual, impact) to Claude and asks for a judgment call on the likely
+// reaction, instead of picking a scenario at random. Returns null on any
+// failure so the caller can fall back to the rule-based logic above.
+async function interpretNewsWithAI(eventList, ctx) {
+  if (!eventList.length) return null;
+  const eventsDesc = eventList.map(ev =>
+    `- ${ev.event} [${ev.currency}, ${ev.impact.toUpperCase()} impact] — previous: ${ev.previous||'—'}, forecast: ${ev.forecast||'—'}, actual: ${ev.actual||'not yet released'}${ev.outcome?` (${ev.outcome})`:''}`
+  ).join('\n');
+
+  const prompt = `You are a forex market analyst. ${eventList.length>1?`${eventList.length} economic news events are happening around the same time`:'One economic news event is happening'} for the pair ${ctx.pair}:
+${eventsDesc}
+
+Context: ${ctx.pair} is currently in a ${ctx.trend>0?'short-term uptrend':'short-term downtrend'} at price ${ctx.price}.
+
+Read and interpret these releases together (a beat on one currency and a miss on another can offset or compound each other) and judge the single most likely net market reaction for ${ctx.pair} over the next few hours.
+
+Respond with ONLY a raw JSON object, no markdown fences, no preamble, in exactly this shape:
+{"scenario":"one of: continuation, reversal, range, liq, highvol, lowvol, bullish, bearish, neutral","directionBias":-1 to 1 (negative=bearish for ${ctx.pair}, positive=bullish),"volatilityMultiplier":0.3 to 3,"confidence":0 to 1,"reasoning":"max 50 words explaining YOUR judgment on how these specific releases affect ${ctx.pair}"}`;
+
+  try {
+    // Calls our own Netlify Function instead of api.anthropic.com / api.openai.com
+    // directly. The real API key lives server-side (Netlify env vars) and is
+    // never present in this file or sent to the browser.
+    const response = await fetch("/.netlify/functions/ai-interpret", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ prompt })
+    });
+    if (!response.ok) throw new Error(`Proxy returned ${response.status}`);
+    const data = await response.json();
+    const text = (data.text || '').trim();
+    const clean = text.replace(/```json|```/g, '').trim();
+    const parsed = JSON.parse(clean);
+
+    const allowedScenarios = ['continuation','reversal','range','liq','highvol','lowvol','bullish','bearish','neutral'];
+    if (!allowedScenarios.includes(parsed.scenario)) return null;
+
+    return {
+      scenario: parsed.scenario,
+      bias: Math.max(-1, Math.min(1, Number(parsed.directionBias) || 0)),
+      volMult: Math.max(0.3, Math.min(3, Number(parsed.volatilityMultiplier) || 1)),
+      confidence: Math.max(0, Math.min(1, Number(parsed.confidence) || 0.5)),
+      reasoning: String(parsed.reasoning || '').slice(0, 400)
+    };
+  } catch (e) {
+    console.warn('AI news interpretation failed, falling back to rule-based scenario:', e);
+    return null;
+  }
+}
+
+async function runSimulation() {
+  if (!historicalCandles.length) return;
+
+  const horizonMap = {'15m':15,'30m':30,'1H':60,'4H':240,'1D':1440,'1W':10080};
+  const tfMinutes  = {'1m':1,'5m':5,'15m':15,'1H':60,'4H':240,'1D':1440}[activeTF]||15;
+  const horizonMin = horizonMap[document.getElementById('sim-horizon').value]||60;
+  const numCandles = Math.max(8, Math.ceil(horizonMin/tfMinutes));
+
+  const scenarioInput = document.getElementById('sim-scenario').value;
+  // All simultaneous news events currently included (auto-detected near "now",
+  // plus/minus any manual checkbox overrides) — not just a single selected item.
+  const activeEvents = getActiveNewsEvents();
+
+  // ── Analyse historical market ──
+  const hist = historicalCandles;
+  const last = hist[hist.length-1];
+  const prev20 = hist.slice(-20);
+  const closes = prev20.map(c=>c.close);
+  const avgClose = closes.reduce((a,b)=>a+b,0)/closes.length;
+  const trend = last.close > avgClose ? 1 : -1; // 1 = uptrend, -1 = downtrend
+  const recentVol = prev20.reduce((s,c)=>s+Math.abs(c.close-c.open),0)/prev20.length;
+  const baseVol = last.close * getVol(activePair);
+  const vol = Math.max(recentVol, baseVol);
+
+  // ── News impact factor (rule-based aggregate across all active events) ──
+  let { bias: newsBias, volMult: newsVolMult } = aggregateNewsBias(activeEvents, activePair);
+
+  // ── Pick scenario ──
+  let scenario = scenarioInput;
+  let aiResult = null;
+  const aiStatusEl = document.getElementById('ai-status');
+  const runBtn = document.getElementById('btn-run-sim');
+
+  if (scenario === 'auto') {
+    if (activeEvents.length) {
+      runBtn.disabled = true;
+      aiStatusEl.style.display = 'inline-block';
+      aiStatusEl.className = 'ai-status thinking';
+      aiStatusEl.textContent = `🧠 Reading ${activeEvents.length} news item${activeEvents.length>1?'s':''}…`;
+      aiResult = await interpretNewsWithAI(activeEvents, { pair: activePair, trend, price: last.close });
+      runBtn.disabled = false;
+    }
+
+    if (aiResult) {
+      scenario = aiResult.scenario;
+      newsBias = aiResult.bias;
+      newsVolMult = aiResult.volMult;
+      aiStatusEl.style.display = 'inline-block';
+      aiStatusEl.className = 'ai-status ok';
+      aiStatusEl.textContent = `🧠 AI judgment (${Math.round(aiResult.confidence*100)}% confidence)`;
+    } else {
+      // Fallback: weighted-random pick, biased toward the aggregate news reading above
+      if (activeEvents.length) {
+        aiStatusEl.style.display = 'inline-block';
+        aiStatusEl.className = 'ai-status fallback';
+        aiStatusEl.textContent = '⚠️ AI unavailable — used rule-based fallback';
+      } else {
+        aiStatusEl.style.display = 'none';
+      }
+      const scenarios = ['continuation','reversal','range','liq','highvol','lowvol'];
+      const weights   = newsBias > 0.15
+        ? [0.35,0.15,0.15,0.15,0.15,0.05]
+        : newsBias < -0.15
+        ? [0.15,0.35,0.15,0.15,0.15,0.05]
+        : [0.25,0.20,0.25,0.15,0.08,0.07];
+      let r=Math.random(), acc=0;
+      for(let i=0;i<scenarios.length;i++){acc+=weights[i];if(r<acc){scenario=scenarios[i];break;}}
+    }
+  } else {
+    aiStatusEl.style.display = 'none';
+  }
+
+  // ── Generate simulation candles ──
+  const tfS = {'1m':60,'5m':300,'15m':900,'1H':3600,'4H':14400,'1D':86400}[activeTF]||900;
+  let price = last.close;
+  const dp  = getDP(activePair);
+  simCandles = [];
+
+  for (let i = 0; i < numCandles; i++) {
+    const t = last.time + (i+1)*tfS;
+    const prog = i/numCandles; // 0→1 progress through sim
+    let mu=0, sigma=vol*newsVolMult;
+
+    switch(scenario) {
+      case 'bullish':      mu = vol*0.6; break;
+      case 'bearish':      mu = -vol*0.6; break;
+      case 'neutral':      mu = 0; sigma*=0.6; break;
+      case 'continuation': mu = trend*vol*0.5; break;
+      case 'reversal':
+        mu = (prog<0.3 ? trend : -trend)*vol*0.55;
+        if(prog>0.25&&prog<0.35) sigma*=1.8; // reversal spike
+        break;
+      case 'highvol':      mu=newsBias*vol*0.3; sigma*=2.2; break;
+      case 'lowvol':       mu=newsBias*vol*0.1; sigma*=0.35; break;
+      case 'liq':
+        // Sweep liquidity then reverse
+        if(prog<0.2) mu = trend*vol*1.2;
+        else if(prog<0.35) mu = -trend*vol*2.0; // sweep + snap
+        else mu = -trend*vol*0.4;
+        break;
+      case 'range':
+        // Oscillate around mean
+        mu = Math.sin(prog*Math.PI*4)*vol*0.4;
+        sigma*=0.7;
+        break;
+      default: mu=newsBias*vol*0.5;
+    }
+
+    mu += newsBias * vol * 0.3 * (1-prog); // news fades over time
+
+    const open  = price;
+    const close = open + mu + (Math.random()-0.5)*sigma;
+    const high  = Math.max(open,close)+Math.random()*sigma*0.5;
+    const low   = Math.min(open,close)-Math.random()*sigma*0.5;
+
+    simCandles.push({ time:t, open:+open.toFixed(dp), high:+high.toFixed(dp), low:+low.toFixed(dp), close:+close.toFixed(dp) });
+    price = close;
+  }
+
+  simActive    = true;
+  simDividerIdx = historicalCandles.length;
+  allCandles   = [...historicalCandles, ...simCandles];
+
+  // Center the divider in the visible window instead of jamming it against the
+  // right edge, so both history and forecast are visible and pannable both ways.
+  const visibleCount = Math.max(10, Math.floor(BASE_VISIBLE / viewScale));
+  viewOffset = Math.max(0, simCandles.length - Math.floor(visibleCount / 2));
+
+  document.getElementById('sim-disclaimer').style.display = 'block';
+  document.getElementById('btn-reset-sim').style.display  = 'inline-block';
+  document.getElementById('btn-run-sim').textContent = '▶ Re-Run';
+
+  drawChart();
+  generateCommentary(scenario, trend, newsBias, newsVolMult, activeEvents, aiResult, price, last.close);
+  saveSimHistory(scenario, last.close, price);
+}
+
+function resetSimulation() {
+  simActive=false; simCandles=[]; simDividerIdx=-1;
+  allCandles=[...historicalCandles];
+  viewOffset=0;
+  document.getElementById('sim-disclaimer').style.display='none';
+  document.getElementById('commentary-panel').classList.remove('visible');
+  document.getElementById('btn-reset-sim').style.display='none';
+  document.getElementById('btn-run-sim').textContent='▶ Run News Simulation';
+  document.getElementById('ai-status').style.display='none';
+  drawChart();
+}
+
+// ── Commentary Generator ──
+// newsEvents: array of every event factored into this run (can be 0, 1, or many simultaneous events)
+// aiResult: the parsed AI interpretation object if Automatic mode used it successfully, else null
+function generateCommentary(scenario, trend, newsBias, volMult, newsEvents, aiResult, endPrice, startPrice) {
+  const dp = getDP(activePair);
+  const dir = endPrice > startPrice ? 'bullish' : 'bearish';
+  const pct = (Math.abs((endPrice-startPrice)/startPrice)*100).toFixed(2);
+  const trendStr = trend > 0 ? 'uptrend' : 'downtrend';
+  const scenarioLabels = { bullish:'Bullish Breakout', bearish:'Bearish Breakdown', neutral:'Neutral Consolidation', continuation:'Trend Continuation', reversal:'Trend Reversal', highvol:'High Volatility Spike', lowvol:'Low Volatility Compression', liq:'Liquidity Grab & Reverse', range:'Range Bound' };
+
+  let newsStr = '';
+  if (newsEvents && newsEvents.length) {
+    if (newsEvents.length === 1) {
+      const ev = newsEvents[0];
+      newsStr = `The ${ev.event} release (${ev.currency}, ${ev.impact.toUpperCase()} impact${ev.actual?`, actual: ${ev.actual}`:''}) ${ev.outcome==='beat'?'beat forecasts, adding bullish pressure':ev.outcome==='miss'?'missed forecasts, adding bearish pressure':'came in line with expectations, limiting directional bias'}. `;
+    } else {
+      const names = newsEvents.map(ev => `${ev.event} (${ev.currency}${ev.outcome?`, ${ev.outcome}`:''})`).join('; ');
+      newsStr = `${newsEvents.length} simultaneous releases were factored in together: ${names}. `;
+    }
+  }
+
+  const aiStr = aiResult
+    ? `🧠 AI read: ${aiResult.reasoning} `
+    : '';
+
+  const commentary = `📊 ${scenarioLabels[scenario]||scenario.toUpperCase()} — ${dir.toUpperCase()} ${pct}% hypothetical move. ${newsStr}${aiStr}Prior to the simulation, ${activePair} was in a ${trendStr} (price ${trend>0?'above':'below'} 20-period average). ${
+    aiResult ? '' : (
+    scenario==='liq' ? `Smart money executed a classic liquidity grab — sweeping stops above/below structure before reversing. Retail traders holding positions in the initial direction were likely stopped out. ` :
+    scenario==='reversal' ? `A trend reversal unfolded. The initial momentum faded as sellers/buyers absorbed the move. Look for confirmation via lower highs (bearish) or higher lows (bullish) before trading the new direction. ` :
+    scenario==='highvol' ? `Volatility expanded significantly — typical for high-impact news. Spreads would widen, stops would be hunted. Institutional order flow dominated both sides of the market. ` :
+    scenario==='range' ? `Price consolidated in a range, with neither buyers nor sellers gaining control. This is common when news beats/misses are priced in or when conflicting fundamentals offset each other. ` :
+    `Price followed the ${trendStr} bias with ${volMult>1.5?'elevated':'normal'} volatility. `
+  )}Support and resistance levels from the historical section remain key — watch for reactions at those zones. This is a hypothetical educational simulation — not a trading signal.`;
+
+  document.getElementById('commentary-text').textContent = commentary;
+  document.getElementById('commentary-panel').classList.add('visible');
+}
+
+// ── Sim History ──
+function saveSimHistory(scenario, startPrice, endPrice) {
+  const dp = getDP(activePair);
+  const entry = {
+    id: Date.now(),
+    pair: activePair, tf: activeTF,
+    scenario, horizon: document.getElementById('sim-horizon').value,
+    startPrice: startPrice.toFixed(dp), endPrice: endPrice.toFixed(dp),
+    dir: endPrice>startPrice?'Bullish':'Bearish',
+    pct: ((Math.abs(endPrice-startPrice)/startPrice)*100).toFixed(2),
+    date: formatWATCompact(new Date()),
+    candles: simCandles,
+    historical: historicalCandles,
+  };
+  simHistory.unshift(entry);
+  if (simHistory.length > 50) simHistory.pop();
+  try { localStorage.setItem('fx_sim_history', JSON.stringify(simHistory)); } catch(e){}
+}
+
+function openSimHistory() {
+  const modal = document.getElementById('sim-history-modal');
+  const list  = document.getElementById('shm-list');
+  if (!simHistory.length) {
+    list.innerHTML = '<div class="shm-empty">No simulations yet. Run your first simulation!</div>';
+  } else {
+    list.innerHTML = simHistory.map((s,i) => `
+      <div class="shm-item">
+        <div class="shm-item-left">
+          <div class="shm-item-pair">${s.pair} · ${s.scenario} · ${s.horizon}</div>
+          <div class="shm-item-meta">${s.date} · ${s.dir} ${s.pct}% · ${s.tf}</div>
+        </div>
+        <button class="shm-btn replay" onclick="replaySimulation(${i})">Replay</button>
+        <button class="shm-btn" onclick="exportSim(${i})">Export</button>
+        <button class="shm-btn del" onclick="deleteSim(${i})">Delete</button>
+      </div>`).join('');
+  }
+  modal.style.display='flex';
+}
+
+function closeSimHistory() { document.getElementById('sim-history-modal').style.display='none'; }
+
+function replaySimulation(i) {
+  const s = simHistory[i];
+  activePair = s.pair; activeTF = s.tf;
+  document.querySelectorAll('.pair-btn').forEach(b=>b.classList.toggle('active',b.dataset.pair===s.pair));
+  document.querySelectorAll('.tf-btn').forEach(b=>b.classList.toggle('active',b.dataset.tf===s.tf));
+  historicalCandles = s.historical;
+  simCandles = s.candles;
+  simActive = true;
+  simDividerIdx = historicalCandles.length;
+  allCandles = [...historicalCandles,...simCandles];
+  const visibleCount = Math.max(10, Math.floor(BASE_VISIBLE / viewScale));
+  viewOffset = Math.max(0, simCandles.length - Math.floor(visibleCount / 2));
+  document.getElementById('sim-disclaimer').style.display='block';
+  document.getElementById('btn-reset-sim').style.display='inline-block';
+  closeSimHistory(); resizeCanvas();
+}
+
+function deleteSim(i) {
+  simHistory.splice(i,1);
+  try { localStorage.setItem('fx_sim_history',JSON.stringify(simHistory)); } catch(e){}
+  openSimHistory();
+}
+
+function exportSim(i) {
+  const s = simHistory[i];
+  const rows = [['time','open','high','low','close','type']];
+  s.historical.forEach(c=>rows.push([new Date(c.time*1000).toISOString(),c.open,c.high,c.low,c.close,'historical']));
+  s.candles.forEach(c=>rows.push([new Date(c.time*1000).toISOString(),c.open,c.high,c.low,c.close,'simulation']));
+  const csv = rows.map(r=>r.join(',')).join('\n');
+  const a = document.createElement('a');
+  a.href='data:text/csv;charset=utf-8,'+encodeURIComponent(csv);
+  a.download=`ForexSim_${s.pair.replace('/','-')}_${s.scenario}_${s.date.replace(/ /g,'_')}.csv`;
+  a.click();
+}
+
+function setPair(pair) {
+  if (!PAIRS.includes(pair)) return;
+  activePair = pair;
+  document.querySelectorAll('.pair-btn').forEach(b => b.classList.toggle('active', b.dataset.pair===pair));
+  loadChartData();
+}
+
+function setTF(tf) {
+  activeTF = tf;
+  document.querySelectorAll('.tf-btn').forEach(b => b.classList.toggle('active', b.dataset.tf===tf));
+  loadChartData();
+}
+
+function setImpactFilter(f, el) {
+  impactFilter = f;
+  document.querySelectorAll('.fbtn').forEach(b => b.classList.remove('active'));
+  el.classList.add('active');
+  renderNews();
+}
+
+// ============================================================
+// BUILD PAIR + TF BUTTONS
+// ============================================================
+function buildControls() {
+  const ps = document.getElementById('pair-selector');
+  ps.innerHTML = PAIRS.map(p =>
+    `<button class="pair-btn ${p===activePair?'active':''}" data-pair="${p}" onclick="setPair('${p}')">${p}</button>`
+  ).join('');
+
+  const ts = document.getElementById('tf-selector-buttons');
+  ts.innerHTML = TIMEFRAMES.map(tf =>
+    `<button class="tf-btn ${tf===activeTF?'active':''}" data-tf="${tf}" onclick="setTF('${tf}')">${tf}</button>`
+  ).join('');
+}
+
+// ============================================================
+// OFFLINE DETECTION
+// ============================================================
+function checkOnline() {
+  document.getElementById('offline-banner').style.display = navigator.onLine ? 'none' : 'block';
+}
+window.addEventListener('online', checkOnline);
+window.addEventListener('offline', checkOnline);
+
+// ============================================================
+// INIT
+// ============================================================
+checkOnline();
+buildControls();
+loadChartData();
+fetchRealCalendar(); // fetch real live news on load
+setInterval(updateClock, 1000);
+setInterval(renderNews, 30000);
+setInterval(fetchRealCalendar, 60 * 60 * 1000); // refresh calendar every hour
+updateClock();
+window.addEventListener('online', () => { checkOnline(); loadChartData(); fetchRealCalendar(); });
+window.addEventListener('offline', () => { checkOnline(); });
+
+// Close modals on ESC
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') { closeVideoModal(); closePopup(); closeSimHistory(); }
+});
+
+// Click outside video modal to close
+document.getElementById('video-modal').addEventListener('click', function(e) {
+  if (e.target === this) closeVideoModal();
+});
+</script>
+</body>
+</html>
