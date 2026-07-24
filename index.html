@@ -16,14 +16,28 @@
     --mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   }
   *{box-sizing:border-box;}
-  html,body{margin:0;padding:0;background:var(--bg);color:var(--ink);font-family:var(--mono);}
+  html,body{margin:0;padding:0;background:var(--bg);color:var(--ink);font-family:var(--mono); height:100%;}
+
+  #fxbg{
+    position:fixed;
+    inset:0;
+    width:100%;
+    height:100%;
+    z-index:0;
+    display:block;
+    will-change:transform;
+    transition:transform 0.25s ease-out;
+  }
 
   .ticker{
+    position:relative;
+    z-index:1;
     border-bottom:1px solid var(--line);
     overflow:hidden;
     white-space:nowrap;
     padding:8px 0;
-    background:var(--panel);
+    background:rgba(17,23,19,0.82);
+    backdrop-filter:blur(3px);
   }
   .ticker span{
     display:inline-block;
@@ -43,11 +57,22 @@
   }
 
   main{
+    position:relative;
+    z-index:1;
     max-width:880px;
     margin:0 auto;
     padding:64px 24px 80px;
   }
 
+  .intro{
+    background:rgba(11,15,13,0.6);
+    backdrop-filter:blur(2px);
+    display:inline-block;
+    padding:16px 18px;
+    margin:0 0 48px;
+    border-radius:2px;
+  }
+  .intro .sub{ margin-bottom:0; }
   .eyebrow{
     color:var(--dim);
     font-size:12px;
@@ -64,8 +89,9 @@
   .sub{
     color:var(--dim);
     font-size:14px;
-    margin:0 0 48px;
+    margin:0;
     line-height:1.6;
+    max-width:60ch;
   }
 
   .rack{
@@ -78,7 +104,8 @@
     grid-template-columns:auto 1fr auto;
     align-items:center;
     gap:20px;
-    background:var(--panel);
+    background:rgba(17,23,19,0.82);
+    backdrop-filter:blur(3px);
     border:1px solid var(--line);
     padding:22px 24px;
     text-decoration:none;
@@ -116,24 +143,29 @@
 
   footer{
     margin-top:56px;
-    padding-top:20px;
+    padding:16px 18px 0;
     border-top:1px solid var(--line);
     font-size:11px;
     color:var(--dim);
     line-height:1.7;
+    background:rgba(11,15,13,0.5);
   }
 </style>
 </head>
 <body>
+
+  <canvas id="fxbg" aria-hidden="true"></canvas>
 
   <div class="ticker" aria-hidden="true">
     <span><b>EUR/USD</b> &nbsp; GBP/USD &nbsp; <b>USD/JPY</b> &nbsp; XAU/USD &nbsp; <b>BTC/USD</b> &nbsp; AUD/USD &nbsp; <b>USD/CHF</b> &nbsp; NZD/USD &nbsp; <b>EUR/GBP</b> &nbsp; XAG/USD &nbsp; <b>ETH/USD</b> &nbsp; USD/CAD</span>
   </div>
 
   <main>
-    <p class="eyebrow">Trading Desk</p>
-    <h1>Three tools, one desk.</h1>
-    <p class="sub">Each tool opens in its own tab, unchanged from its own build. Nothing here touches their logic — this page is just the front door.</p>
+    <div class="intro">
+      <p class="eyebrow">Trading Desk</p>
+      <h1>Three tools, one desk.</h1>
+      <p class="sub">Each tool opens in its own tab, unchanged from its own build. Nothing here touches their logic — this page is just the front door.</p>
+    </div>
 
     <div class="rack">
       <a class="tool" href="news-sim/" target="_blank" rel="noopener">
@@ -169,6 +201,139 @@
       keys stay in environment variables, never in the browser. Journal runs fully client-side.
     </footer>
   </main>
+
+  <script>
+  (function(){
+    const canvas = document.getElementById('fxbg');
+    const ctx = canvas.getContext('2d');
+    const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+    let W, H, DPR;
+    function resize(){
+      DPR = Math.min(window.devicePixelRatio || 1, 2);
+      W = window.innerWidth;
+      H = window.innerHeight;
+      canvas.width = W * DPR;
+      canvas.height = H * DPR;
+      canvas.style.width = W + 'px';
+      canvas.style.height = H + 'px';
+      ctx.setTransform(DPR,0,0,DPR,0,0);
+    }
+    window.addEventListener('resize', resize);
+    resize();
+
+    // Each lane = one "pair" scrolling independently, stacked to fill the screen.
+    const LANES = 6;
+    const CANDLE_W = 7;
+    const GAP = 3;
+    const STEP = CANDLE_W + GAP;
+
+    function makeLane(i){
+      const laneH = H / LANES;
+      const candles = [];
+      let price = 40 + Math.random()*20; // arbitrary walk, purely decorative
+      const count = Math.ceil(W / STEP) + 6;
+      for(let c=0;c<count;c++){
+        candles.push(nextCandle(price));
+        price = candles[candles.length-1].close;
+      }
+      return {
+        y0: i*laneH,
+        h: laneH,
+        candles,
+        speed: 0.4 + Math.random()*0.9, // px/frame, varies per lane
+        offset: 0,
+        vol: 1.4 + Math.random()*2.2 // volatility scale
+      };
+    }
+
+    function nextCandle(prevClose){
+      const vol = 0.6 + Math.random()*1.4;
+      const open = prevClose;
+      const close = open + (Math.random()-0.5) * vol * 2.2;
+      const high = Math.max(open,close) + Math.random()*vol*0.8;
+      const low = Math.min(open,close) - Math.random()*vol*0.8;
+      return {open, close, high, low};
+    }
+
+    let lanes = [];
+    function buildLanes(){
+      lanes = [];
+      for(let i=0;i<LANES;i++) lanes.push(makeLane(i));
+    }
+    buildLanes();
+    window.addEventListener('resize', buildLanes);
+
+    function drawLane(lane){
+      const {y0, h, candles, vol} = lane;
+      const mid = y0 + h/2;
+      const scale = (h*0.36) / 6; // vertical scale so candles fit their band
+
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(0, y0, W, h);
+      ctx.clip();
+
+      for(let i=0;i<candles.length;i++){
+        const x = i*STEP - lane.offset;
+        if(x < -STEP || x > W+STEP) continue;
+        const c = candles[i];
+        const up = c.close >= c.open;
+        ctx.strokeStyle = up ? 'rgba(61,220,132,0.5)' : 'rgba(255,110,110,0.45)';
+        ctx.fillStyle = up ? 'rgba(61,220,132,0.28)' : 'rgba(255,110,110,0.22)';
+        ctx.lineWidth = 1;
+
+        const yHigh = mid - c.high*scale;
+        const yLow  = mid - c.low*scale;
+        const yOpen = mid - c.open*scale;
+        const yClose= mid - c.close*scale;
+        const top = Math.min(yOpen,yClose);
+        const bh = Math.max(Math.abs(yClose-yOpen), 1);
+
+        ctx.beginPath();
+        ctx.moveTo(x + CANDLE_W/2, yHigh);
+        ctx.lineTo(x + CANDLE_W/2, yLow);
+        ctx.stroke();
+
+        ctx.fillRect(x, top, CANDLE_W, bh);
+      }
+      ctx.restore();
+    }
+
+    function tick(){
+      ctx.clearRect(0,0,W,H);
+      for(const lane of lanes){
+        lane.offset += lane.speed;
+        // when a full candle-width has scrolled off, drop it and append a fresh one
+        while(lane.offset >= STEP){
+          lane.offset -= STEP;
+          lane.candles.shift();
+          const last = lane.candles[lane.candles.length-1];
+          lane.candles.push(nextCandle(last.close));
+        }
+        drawLane(lane);
+      }
+      if(!reduceMotion) requestAnimationFrame(tick);
+    }
+
+    if(reduceMotion){
+      // Static single frame, no motion, respects the user's OS setting.
+      for(const lane of lanes) drawLane(lane);
+    } else {
+      requestAnimationFrame(tick);
+    }
+
+    // Cursor parallax: background shifts slightly opposite the mouse for depth.
+    window.addEventListener('mousemove', (e)=>{
+      const dx = (e.clientX / W - 0.5) * 14;
+      const dy = (e.clientY / H - 0.5) * 10;
+      canvas.style.transform = `translate(${-dx}px, ${-dy}px) scale(1.02)`;
+    });
+    window.addEventListener('mouseleave', ()=>{
+      canvas.style.transform = 'translate(0,0) scale(1.02)';
+    });
+  })();
+  </script>
 
 </body>
 </html>
