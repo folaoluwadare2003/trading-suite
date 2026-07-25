@@ -1104,9 +1104,22 @@ function computeAnalysis(asset, tf, epoch, closes, ohlc){
   }
   const consistency = total ? alignedMoves/total : 0.5;
 
-  let trueRangeSum = 0;
-  for(let i=last-13;i<=last;i++){ if(i>0) trueRangeSum += Math.abs(closes[i]-closes[i-1]); }
-  const atrProxy = trueRangeSum/14 || 1e-9;
+  // build A1: weekend/large-gap ATR fix — a plain sum over the last 14 bars lets
+  // a single oversized jump (e.g. Friday close -> Sunday/Monday reopen) inflate
+  // the whole average, making every distance measured against ATR read smaller
+  // than it really is. Compute the median bar-to-bar move first, then exclude
+  // any single bar whose move is >3x that median (a gap, not real 14-bar
+  // volatility) from the sum — falls back to the plain sum if that would
+  // exclude too many bars (e.g. a genuinely fast/volatile stretch, not a gap).
+  const trMoves = [];
+  for(let i=last-13;i<=last;i++){ if(i>0) trMoves.push(Math.abs(closes[i]-closes[i-1])); }
+  const sortedTr = [...trMoves].sort((a,b)=>a-b);
+  const medianTr = sortedTr.length ? sortedTr[Math.floor(sortedTr.length/2)] : 0;
+  const GAP_MULTIPLIER = 3;
+  const gapFiltered = medianTr > 0 ? trMoves.filter(m => m <= medianTr*GAP_MULTIPLIER) : trMoves;
+  const usedMoves = gapFiltered.length >= trMoves.length - 2 ? gapFiltered : trMoves;
+  const trueRangeSum = usedMoves.reduce((s,m)=>s+m, 0);
+  const atrProxy = (usedMoves.length ? trueRangeSum/usedMoves.length : 0) || 1e-9;
   const emaGapATR = Math.abs(diff[last]) / atrProxy;
 
   const priceToE10 = Math.abs(closes[last]-e10[last]) / atrProxy;
@@ -1215,7 +1228,20 @@ function computeAnalysis(asset, tf, epoch, closes, ohlc){
   // this doesn't fire in normal volatility (where the ATR-relative check is
   // already the binding constraint) but blocks the quiet-hours false-max case.
   const roomPctOfPrice = roomDistance / closes[last];
-  const MIN_ROOM_PCT = 0.0015; // 0.15% of price, minimum for full (2pt) credit
+  // build A1: per-asset-class room threshold — a flat 0.15% treated the same
+  // percentage move as "enough room" for everything, but that's meaningless
+  // across such different volatility profiles (0.15% is a real, hard-to-reach
+  // move for a major FX pair, but pure noise for crypto). Scale the floor by
+  // asset class instead: majors need the least room to count, crypto needs
+  // the most, since a small % move there carries far less signal.
+  function getRoomThreshold(cls){
+    if (cls === 'Forex · Major') return 0.0010;
+    if (cls === 'Forex · Cross') return 0.0012;
+    if (cls === 'Metal') return 0.0020;
+    if (cls === 'Crypto') return 0.0050;
+    return 0.0015; // fallback, matches the old flat default
+  }
+  const MIN_ROOM_PCT = getRoomThreshold(asset.cls);
   let roomPts;
   if (roomRatio > 2 && roomPctOfPrice > MIN_ROOM_PCT) roomPts = 2;
   else if (roomRatio > 0.7 && roomPctOfPrice > MIN_ROOM_PCT * 0.5) roomPts = 1;
@@ -1235,7 +1261,15 @@ function computeAnalysis(asset, tf, epoch, closes, ohlc){
     }
   }
 
-  const emaPts = emaConfidence >= 70 ? 2 : (emaConfidence >= 50 ? 1 : 0);
+  // build A1: overextension penalty — emaGapATR (10/50 EMA gap relative to
+  // ATR) previously only ever added toward confidence via emaConfidence, with
+  // no ceiling, treating "wider gap" as unconditionally better. A gap that's
+  // gotten too wide is often a sign price has stretched too far from its
+  // average and is more likely to mean-revert than keep extending, so past a
+  // threshold this now pulls points back down instead of adding more.
+  let emaPts = emaConfidence >= 70 ? 2 : (emaConfidence >= 50 ? 1 : 0);
+  if (emaGapATR > 5.0) emaPts = Math.max(0, emaPts - 2);
+  else if (emaGapATR > 3.0) emaPts = Math.max(0, emaPts - 1);
 
   const scoreTotal = freshnessPts + structurePts + roomPts + htfPts + emaPts;
   const confidence = scoreTotal * 10;
