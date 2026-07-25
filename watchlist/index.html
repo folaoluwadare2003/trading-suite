@@ -1043,24 +1043,6 @@ function fitTrendline(points){
   return { slope, intercept };
 }
 
-// Standard retracement levels (build x) between the most recent swing high
-// and swing low, whichever came first anchoring the move — same deterministic,
-// no-extra-API-call pattern as swings/trendline above. Not used by the
-// existing rule-based scoring, sent to the AI only as another real structural
-// reference point (a price reacting near .5/.618 is classic confluence).
-function computeFibLevels(highs, lows){
-  if (!highs.length || !lows.length) return null;
-  const lastHigh = highs[highs.length-1];
-  const lastLow = lows[lows.length-1];
-  const [start, end] = lastHigh.i < lastLow.i ? [lastHigh, lastLow] : [lastLow, lastHigh];
-  const diff = end.price - start.price;
-  if (Math.abs(diff) < 1e-9) return null;
-  const levels = [0.236, 0.382, 0.5, 0.618, 0.786].map(ratio => ({
-    ratio, price: end.price - diff * ratio
-  }));
-  return { from: start.price, to: end.price, levels };
-}
-
 function computeSwingAndTrendline(ohlc, direction){
   const { highs, lows } = findSwingPoints(ohlc, 3);
   let trendline = null;
@@ -1074,7 +1056,7 @@ function computeSwingAndTrendline(ohlc, direction){
       level: fit.slope * lastIdx + fit.intercept
     };
   }
-  const fibLevels = computeFibLevels(highs, lows);
+  const fibLevels = null; // build y: Fibonacci reasoning removed per Folarin's request
   return { swingHighs: highs, swingLows: lows, trendline, fibLevels };
 }
 
@@ -1085,7 +1067,7 @@ const PARENT_TF = {'15m':'1h','30m':'4h','1h':'4h','4h':'1d','1d':'1w','1w':'1w'
 // bigger candles) is used as "major" S/R here, instead of only ever looking at
 // the current timeframe's own recent ~40 bars. E.g. on 1h, "major" S/R comes
 // from 1d's swing high/low — a real daily range, not an hourly one.
-const MAJOR_SR_TF = {'15m':'1d','30m':'1d','1h':'1d','4h':'1w','1d':'1w','1w':'1w'};
+const MAJOR_SR_TF = {'15m':'1d','30m':'1d','1h':'1d','4h':'1d','1d':'1w','1w':'1w'};
 const TRENDING_SIGNALS = ['Bullish Cross','Bearish Cross','Trend Active','Trend Established','Pullback Setup'];
 
 function computeAnalysis(asset, tf, epoch, closes, ohlc){
@@ -2152,13 +2134,49 @@ function buildAiPayload(sym, r, keySlot){
   // of data already in memory. More bars = the AI is judging "fresh high/low"
   // and trend strength against a longer real window instead of a short one.
   const N = 60;
-  const higherTf = PARENT_TF[state.tf];
+  // build z: higherTimeframe (MAJOR_SR_TF — e.g. 1d for a 1h read) stays for
+  // major structure/EMA/direction. parentTimeframe is new: the immediate next
+  // step up (PARENT_TF — e.g. 4h for a 1h read), sent alongside it for
+  // "market structure" confluence specifically, per Folarin's "why can't it
+  // be both" — both timeframes now reach the AI instead of picking just one.
+  // When PARENT_TF and MAJOR_SR_TF happen to be the same timeframe for a
+  // given tf (e.g. both are 1d for 4h), parentTimeframe is left null so the
+  // same data isn't sent twice under two names.
+  const higherTf = MAJOR_SR_TF[state.tf];
   let higherTimeframe = null;
   if (higherTf && higherTf !== state.tf){
     const htfSnapshot = loadSnapshot(higherTf);
     const htfR = htfSnapshot && htfSnapshot.data ? htfSnapshot.data[sym] : null;
     if (htfR && !htfR.noData){
-      higherTimeframe = { timeframe: higherTf, signal: htfR.signal, direction: htfR.direction, structure: htfR.structure };
+      higherTimeframe = {
+        timeframe: higherTf,
+        signal: htfR.signal,
+        direction: htfR.direction,
+        structure: htfR.structure,
+        last: htfR.last,
+        ema10: htfR.ema10,
+        ema50: htfR.ema50,
+        support: htfR.support,
+        resistance: htfR.resistance,
+        barsSinceCross: htfR.barsSinceCross
+      };
+    }
+  }
+  const parentTf = PARENT_TF[state.tf];
+  let parentTimeframe = null;
+  if (parentTf && parentTf !== state.tf && parentTf !== higherTf){
+    const ptfSnapshot = loadSnapshot(parentTf);
+    const ptfR = ptfSnapshot && ptfSnapshot.data ? ptfSnapshot.data[sym] : null;
+    if (ptfR && !ptfR.noData){
+      parentTimeframe = {
+        timeframe: parentTf,
+        signal: ptfR.signal,
+        direction: ptfR.direction,
+        structure: ptfR.structure,
+        ema10: ptfR.ema10,
+        ema50: ptfR.ema50,
+        barsSinceCross: ptfR.barsSinceCross
+      };
     }
   }
   return {
@@ -2179,8 +2197,8 @@ function buildAiPayload(sym, r, keySlot){
     swingHighs: (r.swingHighs || []).slice(-4).map(p=>p.price),
     swingLows: (r.swingLows || []).slice(-4).map(p=>p.price),
     trendline: r.trendline || null,
-    fibLevels: r.fibLevels || null,
     higherTimeframe,
+    parentTimeframe,
     tradingProfile: TRADING_PROFILE,
     keySlot: keySlot || 0
   };
