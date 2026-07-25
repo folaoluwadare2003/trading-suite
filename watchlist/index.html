@@ -690,12 +690,6 @@ function buildForexAssets(){
 
 const METAL_ASSETS = [
   {sym:'XAUUSD', tdSymbol:'XAU/USD', name:'Gold / US Dollar', cls:'Metal'},
-  {sym:'XAUEUR', tdSymbol:'XAU/EUR', name:'Gold / Euro', cls:'Metal'},
-  {sym:'XAUGBP', tdSymbol:'XAU/GBP', name:'Gold / British Pound', cls:'Metal'},
-  {sym:'XAUJPY', tdSymbol:'XAU/JPY', name:'Gold / Japanese Yen', cls:'Metal'},
-  {sym:'XAGUSD', tdSymbol:'XAG/USD', name:'Silver / US Dollar', cls:'Metal'},
-  {sym:'XAGEUR', tdSymbol:'XAG/EUR', name:'Silver / Euro', cls:'Metal'},
-  {sym:'XPTUSD', tdSymbol:'XPT/USD', name:'Platinum / US Dollar', cls:'Metal'},
 ];
 
 const CRYPTO_ASSETS = [
@@ -1337,12 +1331,11 @@ const ANALYSIS_SCHEMA_VERSION = 2;
 ========================================================= */
 function refreshAll(showSpin){
   // build u: Refresh Market now uses the same parallel multi-key fetch path
-  // Warm Up already used (fast:true), capped at 3 keys in parallel
-  // (maxParallel:3) instead of grabbing every live key at once — leaves 1
-  // key's headroom untouched per refresh while still cutting a full-list
-  // refresh from ~5 sequential batches-of-1-key down to ~2 rounds of 3-in-
-  // parallel (roughly 3x faster than the old fully-sequential single-key path).
-  return ensureDataForTf(state.tf, { force: true, spin: showSpin, fast: true, maxParallel: 3 });
+  // Warm Up already used (fast:true), capped at 2 keys in parallel
+  // (maxParallel:2, lowered from 3 per Folarin's request) instead of grabbing
+  // every live key at once — leaves more headroom untouched per refresh while
+  // still being faster than the old fully-sequential single-key path.
+  return ensureDataForTf(state.tf, { force: true, spin: showSpin, fast: true, maxParallel: 2 });
 }
 
 // build v: bumped 90s -> 15min per Folarin's request, now that Refresh Market
@@ -1398,9 +1391,9 @@ async function fetchAllClosesFast(tf, maxParallel){
   // maxParallel (build u): caps how many keys are used AT ONCE for this run,
   // independent of how many total keys exist/are alive. Warm Up (no maxParallel
   // passed) still uses every live key, unchanged. The Refresh Market button now
-  // passes maxParallel:3, so it never grabs more than 3 keys in parallel even
-  // though there are 4 in TWELVEDATA_KEYS — leaves 1 key's headroom untouched
-  // per refresh, while still being ~3x faster than the old fully-sequential
+  // passes maxParallel:2, so it never grabs more than 2 keys in parallel even
+  // though there are 4 in TWELVEDATA_KEYS — leaves more headroom untouched
+  // per refresh, while still being faster than the old fully-sequential
   // (1-key) refresh path.
   if (maxParallel && maxParallel > 0 && liveKeyIdxs.length > maxParallel){
     liveKeyIdxs = liveKeyIdxs.slice(0, maxParallel);
