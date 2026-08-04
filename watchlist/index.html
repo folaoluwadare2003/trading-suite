@@ -439,6 +439,24 @@ body{
 
 /* =========================================================
    UPDATE LOG (newest first — add a line here on every future patch)
+   2026-08-04 (build z1): FIXED EMA seeding bug, per Folarin's report that
+     "Most Recent Cross" sorting/signals sometimes disagreed with his actual
+     broker terminal. The ema() function was seeding its very first value
+     with a single raw close (series[0]) instead of the standard approach —
+     an SMA of the first `period` closes. With only outputsize=120 bars of
+     history per fetch, that seeding error hadn't fully decayed out by the
+     time it reached EMA50 in particular (k=2/51≈0.039 means residual bias
+     from a bad seed is still ~1% present after 120 bars), which could shift
+     exactly where a 10/50 cross is detected by a bar or more versus a
+     terminal that computes EMA over its full continuous history. Fixed by
+     seeding with the SMA of the first `period` closes (out[period-1]) and
+     backfilling indices before that with the same SMA value (flat warm-up)
+     so nothing downstream (chart rendering, diff/cross detection) breaks on
+     null/NaN. This does NOT fully guarantee 1:1 matching against an external
+     broker terminal — that also depends on TwelveData's price feed and
+     candle-boundary alignment differing from the broker's own feed, which is
+     a data-source difference, not something this fix (or any client-side
+     code change) can close.
    2026-07-23 (build y): Backend-only prompt change (no index.html diff) —
      ai-analyze.js's system prompt now has a mandatory, explicit candlestick
      pattern checklist (bullish/bearish engulfing, pin bar/hammer/shooting
@@ -984,9 +1002,33 @@ function reportFetchProgress(batchNum, totalBatches){
 function ema(series, period){
   const k = 2/(period+1);
   const out = new Array(series.length).fill(null);
-  let prev = series[0];
-  out[0] = prev;
-  for(let i=1;i<series.length;i++){
+  const n = series.length;
+  // build z1 fix: seed with the SMA of the first `period` closes (the
+  // standard/correct way) instead of a single raw close. A single-close seed
+  // leaves a residual bias that hasn't fully decayed out by bar 120,
+  // especially for period=50 — enough to shift exactly where a 10/50 cross
+  // gets detected versus a terminal computing EMA over its full history.
+  if (n < period){
+    // Not enough bars to seed with a proper SMA — fall back to the old
+    // behavior rather than returning nothing.
+    let prev = series[0];
+    out[0] = prev;
+    for(let i=1;i<n;i++){
+      prev = series[i]*k + prev*(1-k);
+      out[i] = prev;
+    }
+    return out;
+  }
+  let sma = 0;
+  for(let i=0;i<period;i++) sma += series[i];
+  sma /= period;
+  // Flat warm-up fill for indices before the seed point — keeps chart lines
+  // and any downstream indexing safe (no null/NaN), and is never read by
+  // cross detection anyway since that only ever looks at recent bars.
+  for(let i=0;i<period;i++) out[i] = sma;
+  let prev = sma;
+  out[period-1] = sma;
+  for(let i=period;i<n;i++){
     prev = series[i]*k + prev*(1-k);
     out[i] = prev;
   }
