@@ -283,7 +283,7 @@ body{
       <div class="brand-mark">FX</div>
       <div>
         <div class="brand-name">ForexSim</div>
-        <div class="brand-sub">SWING DESK · BUILD 2026-07-23-u</div>
+        <div class="brand-sub">SWING DESK · BUILD 2026-08-05-a3</div>
       </div>
     </div>
     <button class="refresh-btn" id="refreshBtn">
@@ -348,8 +348,8 @@ body{
         <svg id="priceChart" viewBox="0 0 700 220" preserveAspectRatio="none"></svg>
         <div class="chart-legend">
           <span><span class="legend-swatch" style="background:#E8A33D"></span>Price</span>
-          <span><span class="legend-swatch" style="background:#FFFFFF"></span>EMA 10</span>
-          <span><span class="legend-swatch" style="background:#3DDC84"></span>EMA 50</span>
+          <span><span class="legend-swatch" style="background:#FFFFFF"></span>MA 10</span>
+          <span><span class="legend-swatch" style="background:#3DDC84"></span>MA 50</span>
         </div>
         <div class="struct-grid" id="structGrid"></div>
       </div>
@@ -424,7 +424,7 @@ body{
           </div>
           <div class="wl-scroll" id="wlScroll"></div>
           <div class="wl-footer">
-            <span id="wlFooterLeft">Strategy: EMA10/50 · Swing</span>
+            <span id="wlFooterLeft">Strategy: MA10/50 · Swing</span>
             <span id="wlFooterUpdated">—</span>
             <span id="wlFooterRight"></span>
           </div>
@@ -439,6 +439,39 @@ body{
 
 /* =========================================================
    UPDATE LOG (newest first — add a line here on every future patch)
+   2026-08-05 (build a3): Switched the app's core moving average from
+     Exponential (EMA) to Simple (SMA), per Folarin's explicit instruction,
+     after an extended back-and-forth trying to explain the ForexSim vs
+     Exness terminal gap as a data-feed/timezone difference. The real root
+     cause turned out to be simpler: his Exness terminal's "MA 10 close"/
+     "MA 50 close" indicators were never actually switched from Simple to
+     Exponential (confirmed still showing the generic "MA" label, unchanged,
+     across every screenshot in this thread) — so ForexSim's correctly-
+     computed EMA was always going to diverge from his terminal's Simple
+     Moving Average, even on near-identical candles, because they're two
+     genuinely different formulas (SMA weighs every bar in its window
+     equally; EMA weighs recent bars far more heavily). Rather than keep
+     asking him to change his terminal, he asked for ForexSim itself to run
+     SMA instead. Added a new sma() function (see section 2b/computeAnalysis)
+     and swapped the two ema(closes,10)/ema(closes,50) calls in
+     computeAnalysis for sma(closes,10)/sma(closes,50) — every downstream
+     calculation (diff, crossIdx, structure, confidence scoring, S/R,
+     swings/trendline) is untouched, it just now operates on SMA values. The
+     old ema() function is left in the file, unused, in case an EMA option
+     is wanted back later. All user-facing "EMA" labels (chart legend,
+     struct grid, watchlist row detail, footer strategy label) were changed
+     to "MA" so the UI doesn't misdescribe what it's now showing. Internal
+     variable/field names (e10, e50, ema10, ema50, and the AI payload's
+     "ema10"/"ema50" fields sent to ai-analyze.js) were deliberately NOT
+     renamed — that's a much larger, riskier refactor across chart/
+     watchlist/AI code for a cosmetic-only gain, and isn't what was actually
+     requested. NOTE: switching to SMA does not by itself guarantee an exact
+     match to the Exness terminal either — the two are still pulling candles
+     from different data providers (TwelveData vs Exness's own feed), a
+     real, separate, unfixable-by-code contributor flagged earlier in this
+     same troubleshooting thread. This build only fixes the SMA/EMA formula
+     mismatch, which was confirmed to still be present and was likely the
+     larger of the two factors.
    2026-08-04 (build ab): Two changes, per Folarin's explicit request to "go
      as much to the max" so he's not juggling keys/repos: (1) OUTPUTSIZE:
      raised from 120 -> 5000 (TwelveData's documented maximum) in BOTH fetch
@@ -1040,6 +1073,38 @@ function reportFetchProgress(batchNum, totalBatches){
   el.textContent = `⏳ Pulling live data — batch ${batchNum} of ${totalBatches} (sequential key mode: this can take a few minutes)`;
 }
 
+// build a3: Simple Moving Average, per Folarin's explicit request to switch
+// the app's calculation from Exponential to Simple — his Exness terminal's
+// "MA 10 close" / "MA 50 close" indicators were never switched to
+// Exponential, so ForexSim's EMA was always going to diverge from a
+// same-period SMA even when fed near-identical candles (SMA weighs every
+// bar in the window equally; EMA weighs recent bars far more heavily — two
+// genuinely different formulas, not a bug in either one). This now matches
+// his terminal's actual math. See computeAnalysis below — e10/e50 variable
+// names are kept as-is throughout the file to avoid a much larger rename
+// across chart/watchlist/AI-payload code; they now hold SMA10/SMA50 values,
+// not EMA10/EMA50. User-facing labels were updated from "EMA" to "MA"
+// wherever they render on screen.
+function sma(series, period){
+  const out = new Array(series.length).fill(null);
+  let sum = 0;
+  for(let i=0;i<series.length;i++){
+    sum += series[i];
+    if (i>=period) sum -= series[i-period];
+    if (i>=period-1) out[i] = sum/period;
+  }
+  // Flat warm-up fill for indices before the first full window, same pattern
+  // as the old EMA seeding fix (build z1) — keeps chart rendering and any
+  // downstream indexing safe from null/NaN; never read by cross detection
+  // since that only ever looks at recent bars.
+  const firstVal = out[period-1];
+  for(let i=0;i<period-1;i++) out[i] = firstVal;
+  return out;
+}
+
+// NOTE: ema() is now unused by computeAnalysis (see build a3 above) but left
+// in place, unmodified, in case Folarin ever wants an EMA option back —
+// nothing else in the file references it anymore.
 function ema(series, period){
   const k = 2/(period+1);
   const out = new Array(series.length).fill(null);
@@ -1161,8 +1226,12 @@ function computeAnalysis(asset, tf, epoch, closes, ohlc){
       last:0, ema10:0, ema50:0, htfAvailable:false, srAvailable:false, invalidated:false,
       ohlc:[], swingHighs:[], swingLows:[], trendline:null };
   }
-  const e10 = ema(closes, 10);
-  const e50 = ema(closes, 50);
+  // build a3: swapped ema() -> sma() — see the sma() function definition
+  // above for why. Every downstream calculation (diff, crossIdx, structure,
+  // confidence scoring) is untouched; it just now operates on SMA values
+  // instead of EMA values, which is the actual, intentional change here.
+  const e10 = sma(closes, 10);
+  const e50 = sma(closes, 50);
   const n = closes.length;
   const last = n-1;
 
@@ -2049,9 +2118,9 @@ function renderWatchlist(){
     <div class="wl-row-detail" data-detail="${a.sym}" style="display:${a.sym===state.selected?'flex':'none'}">
       <span><b>Signal</b> ${r.signal}</span>
       <span><b>Confluence</b> ${r.scoreTotal ?? '—'}/10 (fresh ${r.scoreBreakdown?.freshnessPts ?? '—'} · struct ${r.scoreBreakdown?.structurePts ?? '—'} · room ${r.scoreBreakdown?.roomPts ?? '—'}${r.srAvailable?'':'*'} · HTF ${r.scoreBreakdown?.htfPts ?? '—'}${r.htfAvailable?'':'*'} · ema ${r.scoreBreakdown?.emaPts ?? '—'})</span>
-      ${r.invalidated ? '<span style="color:#F0475B;font-weight:600;margin-left:8px;" title="Price has already moved back through EMA10 against this signal\'s direction — freshness score forced to 0.">⚠ price back through EMA10</span>' : ''}
-      <span><b>EMA10</b> ${r.ema10.toFixed(decimals)}</span>
-      <span><b>EMA50</b> ${r.ema50.toFixed(decimals)}</span>
+      ${r.invalidated ? '<span style="color:#F0475B;font-weight:600;margin-left:8px;" title="Price has already moved back through MA10 against this signal\'s direction — freshness score forced to 0.">⚠ price back through MA10</span>' : ''}
+      <span><b>MA10</b> ${r.ema10.toFixed(decimals)}</span>
+      <span><b>MA50</b> ${r.ema50.toFixed(decimals)}</span>
       <span><b>Structure</b> ${r.structure}</span>
       <span><b>S</b> ${r.support.toFixed(decimals)}${r.srAvailable?'':' <i>(local)</i>'}</span>
       <span><b>R</b> ${r.resistance.toFixed(decimals)}${r.srAvailable?'':' <i>(local)</i>'}</span>
@@ -2127,14 +2196,14 @@ function renderMain(){
   const si = sessionInfoFor(asset);
   document.getElementById('structGrid').innerHTML = `
     <div class="struct-item"><div class="struct-label">Signal</div><div class="struct-value" style="color:var(--${meta.c})">${r.signal}</div></div>
-    <div class="struct-item"><div class="struct-label">EMA Gap Trend</div><div class="struct-value">${r.signal.startsWith('Approaching')?'Converging':'—'}</div></div>
+    <div class="struct-item"><div class="struct-label">MA Gap Trend</div><div class="struct-value">${r.signal.startsWith('Approaching')?'Converging':'—'}</div></div>
     <div class="struct-item"><div class="struct-label">Confidence</div><div class="struct-value">${r.confidence}%</div></div>
     <div class="struct-item"><div class="struct-label">Market Structure</div><div class="struct-value">${r.structure}</div></div>
-    <div class="struct-item"><div class="struct-label">EMA Relationship</div><div class="struct-value">10 ${r.ema10>r.ema50?'&gt;':'&lt;'} 50</div></div>
+    <div class="struct-item"><div class="struct-label">MA Relationship</div><div class="struct-value">10 ${r.ema10>r.ema50?'&gt;':'&lt;'} 50</div></div>
     <div class="struct-item"><div class="struct-label">Support ${r.srAvailable?'(major)':'(local)'}</div><div class="struct-value">${r.support.toFixed(decimals)}</div></div>
     <div class="struct-item"><div class="struct-label">Resistance ${r.srAvailable?'(major)':'(local)'}</div><div class="struct-value">${r.resistance.toFixed(decimals)}</div></div>
-    <div class="struct-item"><div class="struct-label">EMA 10</div><div class="struct-value">${r.ema10.toFixed(decimals)}</div></div>
-    <div class="struct-item"><div class="struct-label">EMA 50</div><div class="struct-value">${r.ema50.toFixed(decimals)}</div></div>
+    <div class="struct-item"><div class="struct-label">MA 10</div><div class="struct-value">${r.ema10.toFixed(decimals)}</div></div>
+    <div class="struct-item"><div class="struct-label">MA 50</div><div class="struct-value">${r.ema50.toFixed(decimals)}</div></div>
     <div class="struct-item session-row"><div class="struct-label">Active session</div><div class="struct-value">${si.time}</div></div>
   `;
 
