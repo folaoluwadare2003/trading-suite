@@ -439,6 +439,34 @@ body{
 
 /* =========================================================
    UPDATE LOG (newest first — add a line here on every future patch)
+   2026-08-04 (build ab): Two changes, per Folarin's explicit request to "go
+     as much to the max" so he's not juggling keys/repos: (1) OUTPUTSIZE:
+     raised from 120 -> 5000 (TwelveData's documented maximum) in BOTH fetch
+     paths (fetchAllCloses's twelveDataFetch call and fastFetchBatch's URL),
+     now driven by one shared FETCH_OUTPUTSIZE constant so the two paths
+     can't drift out of sync again. This costs NOTHING extra in API credits
+     — TwelveData bills per symbol per call, not per outputsize/bar-count
+     (confirmed against their published credit docs), so this is a pure
+     accuracy upgrade with no quota tradeoff. Practical effect: on the daily
+     timeframe, 5000 bars is roughly 19 years of trading history (forex
+     trades ~5 days/week, not 7, so this is more than double what a naive
+     "5000 calendar days" estimate would suggest) — plenty of runway for the
+     EMA50 seeding bias fixed in build z1 to fully decay rather than the
+     ~1% residual still present at 120 bars.
+     (2) CHART DISPLAY DECOUPLED FROM ANALYSIS DATA: with outputsize this
+     large, feeding the entire closes/EMA arrays straight into drawChart's
+     fixed 700px SVG would have crushed thousands of candles into an
+     unreadable smear (Folarin's concern, and correct — there's no pan/zoom
+     on this SVG chart, unlike the older Canvas-based news-sim project).
+     computeAnalysis/ema() still run on the FULL pulled history, completely
+     unchanged — only drawChart() now slices off just the most recent
+     CHART_DISPLAY_BARS (150) for what actually gets drawn. The old
+     line(e10,15)/line(e50,20) "skip the flat warm-up" offsets are now
+     computed relative to the slice's start position (e10Skip/e50Skip) —
+     with thousands of bars cached, the warm-up region is normally long
+     out of the visible window already, so these now correctly resolve to
+     0 in the common case instead of incorrectly chopping real recent data
+     off the front of the display slice.
    2026-08-04 (build z1): FIXED EMA seeding bug, per Folarin's report that
      "Most Recent Cross" sorting/signals sometimes disagreed with his actual
      broker terminal. The ema() function was seeding its very first value
@@ -782,6 +810,19 @@ const TF_MINUTES = {'15m':15,'30m':30,'1h':60,'4h':240,'1d':1440,'1w':10080};
 /* =========================================================
    2. LIVE MARKET DATA (Twelve Data)
 ========================================================= */
+// build ab: shared by both fetch paths (sequential + fast/parallel) so they
+// can't silently drift apart again. Raised 120 -> 5000 (TwelveData's
+// documented max for outputsize) per Folarin's explicit "go to the max"
+// request — costs nothing extra since TwelveData bills credits per symbol
+// per call, not per outputsize.
+const FETCH_OUTPUTSIZE = 5000;
+// build ab: how many of the most recent bars actually get drawn in the SVG
+// chart. Kept small and separate from FETCH_OUTPUTSIZE on purpose — this
+// chart has no pan/zoom, so cramming thousands of bars into a fixed 700px
+// width would just be an unreadable smear. The full FETCH_OUTPUTSIZE history
+// still feeds the EMA/structure math untouched; only the visual is trimmed.
+const CHART_DISPLAY_BARS = 150;
+
 function mulberry32(seed){
   return function(){
     seed |= 0; seed = (seed + 0x6D2B79F5) | 0;
@@ -961,7 +1002,7 @@ async function fetchAllCloses(tf){
     reportFetchProgress(batchNum, totalBatches);
     const batch = ASSETS.slice(i, i+BATCH_SIZE);
     const tdSymbols = batch.map(a=>a.tdSymbol);
-    const data = await twelveDataFetch(tdSymbols, interval, 120);
+    const data = await twelveDataFetch(tdSymbols, interval, FETCH_OUTPUTSIZE);
     batch.forEach(a=>{
       const entry = data[a.tdSymbol];
       if (data.__error || !entry || entry.status === 'error' || !entry.values){
@@ -1264,7 +1305,7 @@ function computeAnalysis(asset, tf, epoch, closes, ohlc){
   const roomDistance = direction==='bullish' ? (resistance - closes[last]) : (closes[last] - support);
   const roomRatio = roomDistance / atrProxy;
   // Volatility floor: roomRatio alone is ATR-relative, so a quiet/stagnant
-  // market (small ATR) can make a tiny, meaningless real-terms gap look like
+  // market (small ATR) can make a tiny, meaningless real-terms gap register as
   // "lots of room" just because the denominator shrank. Require the room to
   // also clear a minimum as a plain percentage of price before it counts —
   // this doesn't fire in normal volatility (where the ATR-relative check is
@@ -1413,7 +1454,7 @@ async function fastFetchBatch(tdSymbols, interval, keyIdx){
   fastKeyState.availableAt[keyIdx] = Date.now() + 61000;
   const key = TWELVEDATA_KEYS[keyIdx];
   const symbolParam = tdSymbols.join(',');
-  const url = `https://api.twelvedata.com/time_series?symbol=${encodeURIComponent(symbolParam)}&interval=${interval}&outputsize=120&order=ASC&apikey=${key}`;
+  const url = `https://api.twelvedata.com/time_series?symbol=${encodeURIComponent(symbolParam)}&interval=${interval}&outputsize=${FETCH_OUTPUTSIZE}&order=ASC&apikey=${key}`;
   try{
     const res = await fetch(url);
     checkCreditHeaders(res, keyIdx);
@@ -2105,18 +2146,36 @@ function renderMain(){
 function drawChart(r, decimals){
   const svg = document.getElementById('priceChart');
   const w=700, h=220, pad=8;
-  const closes = r.closes, e10=r.e10, e50=r.e50;
+  // build ab: chart display is now decoupled from the EMA/analysis data.
+  // r.closes/r.e10/r.e50 can be thousands of bars long (FETCH_OUTPUTSIZE),
+  // since EMA math benefits from more history — but drawing all of them
+  // into a fixed 700px-wide SVG polyline would just be an unreadable smear
+  // with no way to pan/zoom into it. So only the most recent
+  // CHART_DISPLAY_BARS are sliced off for the visual, while the full array
+  // is still what computeAnalysis/ema() ran on.
+  const total = r.closes.length;
+  const start = Math.max(0, total - CHART_DISPLAY_BARS);
+  const closes = r.closes.slice(start);
+  const e10 = r.e10.slice(start);
+  const e50 = r.e50.slice(start);
   const all = closes.concat(e10.slice(45)).concat(e50.slice(45));
   const min = Math.min(...all), max = Math.max(...all);
   const range = (max-min)||1;
   const x = i => (i/(closes.length-1))*(w-2*pad)+pad;
   const y = v => h - pad - ((v-min)/range)*(h-2*pad);
   const line = (arr, from=0) => arr.map((v,i)=> i<from? '' : `${x(i)},${y(v)}`).filter(Boolean).join(' ');
+  // These "from" skip offsets used to hard-skip the first N points of the
+  // WHOLE dataset to avoid drawing the flat SMA warm-up segment. Now that we
+  // slice to the display window first, that warm-up is normally already
+  // long gone from `start` onward — only apply a skip if the warm-up region
+  // still overlaps the visible slice (i.e. very little history cached yet).
+  const e10Skip = Math.max(0, 15 - start);
+  const e50Skip = Math.max(0, 20 - start);
 
   svg.innerHTML = `
     <polyline points="${line(closes)}" fill="none" stroke="#E8A33D" stroke-width="1.3" opacity="0.9"/>
-    <polyline points="${line(e50,20)}" fill="none" stroke="#3DDC84" stroke-width="1.6"/>
-    <polyline points="${line(e10,15)}" fill="none" stroke="#FFFFFF" stroke-width="1.6"/>
+    <polyline points="${line(e50,e50Skip)}" fill="none" stroke="#3DDC84" stroke-width="1.6"/>
+    <polyline points="${line(e10,e10Skip)}" fill="none" stroke="#FFFFFF" stroke-width="1.6"/>
     <line x1="${pad}" y1="${y(r.support)}" x2="${w-pad}" y2="${y(r.support)}" stroke="#3DDC84" stroke-width="1" stroke-dasharray="4 3" opacity="0.55"/>
     <line x1="${pad}" y1="${y(r.resistance)}" x2="${w-pad}" y2="${y(r.resistance)}" stroke="#F0475B" stroke-width="1" stroke-dasharray="4 3" opacity="0.55"/>
   `;
@@ -2205,10 +2264,10 @@ function aiReadKey(){ return state.selected + '|' + state.tf; }
 // OHLC (not just closes), swing highs/lows, and a trendline read alongside
 // everything the AI already had, per the accuracy discussion in the brief.
 function buildAiPayload(sym, r, keySlot){
-  // build x: bumped 25 -> 60. Costs nothing — outputsize=120 bars are already
-  // fetched/cached for the EMA math (twelveDataFetch), this just slices more
-  // of data already in memory. More bars = the AI is judging "fresh high/low"
-  // and trend strength against a longer real window instead of a short one.
+  // build x: bumped 25 -> 60. Costs nothing — this just slices more of data
+  // already in memory (FETCH_OUTPUTSIZE bars are already fetched/cached for
+  // the EMA math). More bars = the AI is judging "fresh high/low" and trend
+  // strength against a longer real window instead of a short one.
   const N = 60;
   // build z: higherTimeframe (MAJOR_SR_TF — e.g. 1d for a 1h read) stays for
   // major structure/EMA/direction. parentTimeframe is new: the immediate next
