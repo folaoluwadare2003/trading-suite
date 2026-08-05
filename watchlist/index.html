@@ -867,7 +867,17 @@ const CHART_DISPLAY_BARS = 150;
 // failing with no visible error — timeframes you weren't actively refreshing
 // kept showing whatever the last snapshot was that fit under quota (which is
 // exactly the "reverts to yesterday's data after switching timeframes" bug).
-const CACHE_TAIL_BARS = 300;
+// build af: dropped 300 -> 120. My earlier size estimate (build ac) counted
+// JSON string characters as if 1 char = 1 byte — but browsers store JS
+// strings as UTF-16, ~2 bytes/char, so real storage cost was double what was
+// calculated. 300 bars actually needed ~10MB across all 6 timeframes, not
+// ~5MB, so it kept hitting "quota exceeded" in practice on top of whatever
+// else lives in localStorage (accuracy log, key state). 120 bars keeps total
+// usage to ~4MB, leaving real margin. This is a stopgap, not a permanent
+// ceiling — it's a browser localStorage limit, not something fixable by
+// tuning this number forever; a real fix means moving off localStorage
+// (e.g. IndexedDB) if more history is ever needed again.
+const CACHE_TAIL_BARS = 120;
 
 function mulberry32(seed){
   return function(){
@@ -2003,13 +2013,23 @@ function sniperTier(r){
 
 function sortAssets(list){
   const d = state.data;
+  // build ae: every branch used to assume d[sym] always exists, which is true
+  // once the app's been running a while but crashes ("d[b.sym] is undefined")
+  // on a brand-new domain where localStorage — and therefore state.data — is
+  // still completely empty before the first Refresh/Warm Up. confOf/etc. below
+  // treat a missing entry as lowest-priority instead of throwing.
+  const confOf = (sym) => d[sym] ? d[sym].confidence : -1;
+  const bullOf = (sym) => d[sym] ? bullScore(d[sym]) : -1;
+  const bearOf = (sym) => d[sym] ? bearScore(d[sym]) : -1;
+  const barsOf = (sym) => d[sym] ? (d[sym].barsSinceCross ?? 999) : 999;
+  const volOf = (sym) => d[sym] ? d[sym].volatilityScore : -1;
   switch(state.sort){
     case 'bullish':
-      return list.sort((a,b)=> bullScore(d[b.sym]) - bullScore(d[a.sym]));
+      return list.sort((a,b)=> bullOf(b.sym) - bullOf(a.sym));
     case 'bearish':
-      return list.sort((a,b)=> bearScore(d[b.sym]) - bearScore(d[a.sym]));
+      return list.sort((a,b)=> bearOf(b.sym) - bearOf(a.sym));
     case 'confidence':
-      return list.sort((a,b)=> d[b.sym].confidence - d[a.sym].confidence);
+      return list.sort((a,b)=> confOf(b.sym) - confOf(a.sym));
     case 'aiConfidence': {
       // Entry Read lifecycle order: Extending -> Cooling -> Exhausted -> Reversing.
       // AI reads are per-asset/on-demand OR via Analyze All (build t) for the
@@ -2029,13 +2049,13 @@ function sortAssets(list){
           if (stageDiff !== 0) return stageDiff;
           return rb.confidence - ra.confidence;
         }
-        return d[b.sym].confidence - d[a.sym].confidence;
+        return confOf(b.sym) - confOf(a.sym);
       });
     }
     case 'recent':
-      return list.sort((a,b)=> (d[a.sym].barsSinceCross ?? 999) - (d[b.sym].barsSinceCross ?? 999));
+      return list.sort((a,b)=> barsOf(a.sym) - barsOf(b.sym));
     case 'volatility':
-      return list.sort((a,b)=> d[b.sym].volatilityScore - d[a.sym].volatilityScore);
+      return list.sort((a,b)=> volOf(b.sym) - volOf(a.sym));
     case 'alpha':
       return list.sort((a,b)=> a.sym.localeCompare(b.sym));
     case 'class':
@@ -2382,15 +2402,13 @@ function aiReadKey(){ return state.selected + '|' + state.tf; }
 // OHLC (not just closes), swing highs/lows, and a trendline read alongside
 // everything the AI already had, per the accuracy discussion in the brief.
 function buildAiPayload(sym, r, keySlot){
-  // build ad: bumped 60 -> 300 per Folarin's request, to match CACHE_TAIL_BARS
-  // exactly — N must never exceed CACHE_TAIL_BARS, since a timeframe read from
-  // the localStorage cache (not fresh off a live fetch) will only ever have
-  // CACHE_TAIL_BARS worth of closes/ohlc on hand. Costs nothing extra in
-  // storage (it's slicing data already in memory either way); the real cost
-  // is a ~5x bigger prompt sent to Gemini per asset — more tokens, marginally
-  // slower, and worth watching against free-tier rate limits during "Analyze
-  // All" batches, which fire many of these calls back to back.
-  const N = 300;
+  // build af: dropped 300 -> 120, tracking CACHE_TAIL_BARS back down (see that
+  // constant's comment — 300 was overflowing localStorage quota in practice).
+  // N must never exceed CACHE_TAIL_BARS, since a timeframe read from cache
+  // (not fresh off a live fetch) only ever has CACHE_TAIL_BARS worth of
+  // closes/ohlc on hand. Still double the original 60, so the AI's window
+  // is bigger than where we started, just not as big as first attempted.
+  const N = 120;
   // build z: higherTimeframe (MAJOR_SR_TF — e.g. 1d for a 1h read) stays for
   // major structure/EMA/direction. parentTimeframe is new: the immediate next
   // step up (PARENT_TF — e.g. 4h for a 1h read), sent alongside it for
