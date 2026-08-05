@@ -855,6 +855,19 @@ const FETCH_OUTPUTSIZE = 5000;
 // width would just be an unreadable smear. The full FETCH_OUTPUTSIZE history
 // still feeds the EMA/structure math untouched; only the visual is trimmed.
 const CHART_DISPLAY_BARS = 150;
+// build ac: how many trailing bars of closes/e10/e50/ohlc actually get
+// PERSISTED to localStorage per asset per timeframe. Everything downstream of
+// a live fetch (chart draw = CHART_DISPLAY_BARS = 150, AI payload = N = 60,
+// local S/R window = last 40) only ever reads the tail of these arrays — the
+// full FETCH_OUTPUTSIZE=5000 history is only needed in-memory, at fetch time,
+// for the SMA math itself. Storing all 5000 bars x 4 arrays x ~33 assets was
+// ~14MB for ONE timeframe (~83MB for all 6 combined) against a browser
+// localStorage quota that's typically 5-10MB total per site. saveSnapshot's
+// try/catch was swallowing that QuotaExceededError silently, so writes were
+// failing with no visible error — timeframes you weren't actively refreshing
+// kept showing whatever the last snapshot was that fit under quota (which is
+// exactly the "reverts to yesterday's data after switching timeframes" bug).
+const CACHE_TAIL_BARS = 300;
 
 function mulberry32(seed){
   return function(){
@@ -1614,10 +1627,46 @@ async function computeAssetData(tf, epoch, fast, maxParallel){
   return data;
 }
 
+// build ac: trims the big per-bar arrays down to CACHE_TAIL_BARS before
+// persisting — the in-memory `data` object passed in (and therefore state.data,
+// the chart, the AI payload) is untouched; this only shrinks the copy that
+// gets written to localStorage. All the already-computed scalar fields
+// (signal, confidence, support, resistance, crossIdx, barsSinceCross, etc.)
+// are carried over in full, since those are cheap and are what cross-timeframe
+// reads (htfPts, srAvailable) actually use — only the 4 raw per-bar arrays
+// are trimmed.
+function trimForStorage(data){
+  const out = {};
+  for (const sym in data){
+    const r = data[sym];
+    if (!r || r.noData){ out[sym] = r; continue; }
+    out[sym] = {
+      ...r,
+      closes: (r.closes || []).slice(-CACHE_TAIL_BARS),
+      e10: (r.e10 || []).slice(-CACHE_TAIL_BARS),
+      e50: (r.e50 || []).slice(-CACHE_TAIL_BARS),
+      ohlc: (r.ohlc || []).slice(-CACHE_TAIL_BARS),
+    };
+  }
+  return out;
+}
 function saveSnapshot(tf, epoch, data, lastSync){
   try{
-    localStorage.setItem(cacheKeyFor(tf), JSON.stringify({ v: ANALYSIS_SCHEMA_VERSION, epoch, tf, data, lastSync }));
-  }catch(e){}
+    const trimmed = trimForStorage(data);
+    localStorage.setItem(cacheKeyFor(tf), JSON.stringify({ v: ANALYSIS_SCHEMA_VERSION, epoch, tf, data: trimmed, lastSync }));
+  }catch(e){
+    // build ac: this used to fail silently on QuotaExceededError, which was
+    // the actual root cause of timeframes reverting to old cached data with
+    // no warning at all — surface it instead, so a real failure (whatever the
+    // cause) is visible rather than invisible.
+    console.error(`[ForexSim] saveSnapshot FAILED for ${tf} — this timeframe's cache was NOT updated: ${e.message}`);
+    const cacheLabel = document.getElementById('cacheStatus');
+    if (cacheLabel){
+      cacheLabel.style.display = 'inline';
+      cacheLabel.style.color = '#f0475b';
+      cacheLabel.textContent = `⚠ Save failed for ${tf.toUpperCase()} (${e.message}) — this timeframe still shows old data`;
+    }
+  }
 }
 function loadSnapshot(tf){
   try{
@@ -2333,11 +2382,15 @@ function aiReadKey(){ return state.selected + '|' + state.tf; }
 // OHLC (not just closes), swing highs/lows, and a trendline read alongside
 // everything the AI already had, per the accuracy discussion in the brief.
 function buildAiPayload(sym, r, keySlot){
-  // build x: bumped 25 -> 60. Costs nothing — this just slices more of data
-  // already in memory (FETCH_OUTPUTSIZE bars are already fetched/cached for
-  // the EMA math). More bars = the AI is judging "fresh high/low" and trend
-  // strength against a longer real window instead of a short one.
-  const N = 60;
+  // build ad: bumped 60 -> 300 per Folarin's request, to match CACHE_TAIL_BARS
+  // exactly — N must never exceed CACHE_TAIL_BARS, since a timeframe read from
+  // the localStorage cache (not fresh off a live fetch) will only ever have
+  // CACHE_TAIL_BARS worth of closes/ohlc on hand. Costs nothing extra in
+  // storage (it's slicing data already in memory either way); the real cost
+  // is a ~5x bigger prompt sent to Gemini per asset — more tokens, marginally
+  // slower, and worth watching against free-tier rate limits during "Analyze
+  // All" batches, which fire many of these calls back to back.
+  const N = 300;
   // build z: higherTimeframe (MAJOR_SR_TF — e.g. 1d for a 1h read) stays for
   // major structure/EMA/direction. parentTimeframe is new: the immediate next
   // step up (PARENT_TF — e.g. 4h for a 1h read), sent alongside it for
