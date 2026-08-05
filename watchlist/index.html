@@ -1656,6 +1656,16 @@ function trimForStorage(data){
       e10: (r.e10 || []).slice(-CACHE_TAIL_BARS),
       e50: (r.e50 || []).slice(-CACHE_TAIL_BARS),
       ohlc: (r.ohlc || []).slice(-CACHE_TAIL_BARS),
+      // build ag: swingHighs/swingLows were NEVER trimmed before this — they're
+      // computed by scanning the full untrimmed 5000-bar ohlc array (a swing
+      // point roughly every 5-6 bars), so each asset/timeframe was carrying
+      // ~900 raw {i,price} points into storage. Nothing in the app reads more
+      // than the last 4 (buildAiPayload's .slice(-4)) — measured on realistic
+      // data this alone was ~13MB across all assets/timeframes, bigger than
+      // the OHLC arrays we already trimmed. That's the actual reason quota
+      // kept getting exceeded even after CACHE_TAIL_BARS was cut to 120.
+      swingHighs: (r.swingHighs || []).slice(-10),
+      swingLows: (r.swingLows || []).slice(-10),
     };
   }
   return out;
