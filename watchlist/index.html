@@ -877,7 +877,13 @@ const CHART_DISPLAY_BARS = 150;
 // ceiling — it's a browser localStorage limit, not something fixable by
 // tuning this number forever; a real fix means moving off localStorage
 // (e.g. IndexedDB) if more history is ever needed again.
-const CACHE_TAIL_BARS = 120;
+// build ah: dropped 120 -> 80. Even after trimming swingHighs/swingLows
+// (build ag), the cumulative total across all 6 timeframes was still ~4.3MB —
+// close enough to the real quota that whichever timeframe saves LAST in Warm
+// Up's order (15m) kept tipping it over once the other 5 had already claimed
+// most of the room. 80 bars brings total usage to ~3MB, leaving real margin
+// instead of riding the edge again.
+const CACHE_TAIL_BARS = 80;
 
 function mulberry32(seed){
   return function(){
@@ -2418,7 +2424,9 @@ function buildAiPayload(sym, r, keySlot){
   // (not fresh off a live fetch) only ever has CACHE_TAIL_BARS worth of
   // closes/ohlc on hand. Still double the original 60, so the AI's window
   // is bigger than where we started, just not as big as first attempted.
-  const N = 120;
+  // build ah: tracking CACHE_TAIL_BARS back down to 80 (see that constant's
+  // comment) — N can't exceed it.
+  const N = 80;
   // build z: higherTimeframe (MAJOR_SR_TF — e.g. 1d for a 1h read) stays for
   // major structure/EMA/direction. parentTimeframe is new: the immediate next
   // step up (PARENT_TF — e.g. 4h for a 1h read), sent alongside it for
