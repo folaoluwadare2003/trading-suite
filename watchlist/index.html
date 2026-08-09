@@ -404,7 +404,6 @@ body{
             <div class="wl-selects">
               <select class="wl-select" id="wlTimeframe">
                 <option value="15m">15 Minutes</option>
-                <option value="30m">30 Minutes</option>
                 <option value="1h" selected>1 Hour</option>
                 <option value="4h">4 Hours</option>
                 <option value="1d">1 Day</option>
@@ -838,16 +837,20 @@ function sessionInfoFor(asset){
 
 const CLASSES = ['All','Forex · Major','Forex · Cross','Metal','Crypto'];
 
-const TF_MINUTES = {'15m':15,'30m':30,'1h':60,'4h':240,'1d':1440,'1w':10080};
+const TF_MINUTES = {'15m':15,'1h':60,'4h':240,'1d':1440,'1w':10080};
 
 /* =========================================================
    2. LIVE MARKET DATA (Twelve Data)
 ========================================================= */
-// build ab: shared by both fetch paths (sequential + fast/parallel) so they
-// can't silently drift apart again. Raised 120 -> 5000 (TwelveData's
-// documented max for outputsize) per Folarin's explicit "go to the max"
-// request — costs nothing extra since TwelveData bills credits per symbol
-// per call, not per outputsize.
+// build a4: briefly lowered 5000 -> 1000 to fix truncated/CORS-masked
+// parallel-fetch failures (see build ab/a4 history above). Restored to 5000
+// per Folarin's explicit request ("still retain the max stuff earlier") now
+// that the 30m timeframe has been removed entirely — that alone drops one of
+// six concurrent WARMUP_ORDER/batch groups, cutting overall parallel load
+// enough that the original 5000-bar max should be safe again. If the same
+// truncated-response/CORS errors return in the console after this, the next
+// lever is reducing symbols-per-batch (currently 4) or parallel batch
+// concurrency, not outputsize.
 const FETCH_OUTPUTSIZE = 5000;
 // build ab: how many of the most recent bars actually get drawn in the SVG
 // chart. Kept small and separate from FETCH_OUTPUTSIZE on purpose — this
@@ -1011,7 +1014,7 @@ function renderKeyStatusPanel(){
   }).join('');
 }
 
-const TD_INTERVAL = {'15m':'15min','30m':'30min','1h':'1h','4h':'4h','1d':'1day','1w':'1week'};
+const TD_INTERVAL = {'15m':'15min','1h':'1h','4h':'4h','1d':'1day','1w':'1week'};
 
 async function twelveDataFetch(tdSymbols, interval, outputsize){
   const symbolParam = tdSymbols.join(',');
@@ -1237,14 +1240,14 @@ function computeSwingAndTrendline(ohlc, direction){
   return { swingHighs: highs, swingLows: lows, trendline, fibLevels };
 }
 
-const PARENT_TF = {'15m':'1h','30m':'4h','1h':'4h','4h':'1d','1d':'1w','1w':'1w'};
+const PARENT_TF = {'15m':'1h','1h':'4h','4h':'1d','1d':'1w','1w':'1w'};
 // Distinct from PARENT_TF (which only checks one step up for trend agreement):
 // this maps each timeframe to a genuinely higher timeframe whose own support/
 // resistance (itself just that timeframe's local swing high/low, but on much
 // bigger candles) is used as "major" S/R here, instead of only ever looking at
 // the current timeframe's own recent ~40 bars. E.g. on 1h, "major" S/R comes
 // from 1d's swing high/low — a real daily range, not an hourly one.
-const MAJOR_SR_TF = {'15m':'1d','30m':'1d','1h':'1d','4h':'1d','1d':'1w','1w':'1w'};
+const MAJOR_SR_TF = {'15m':'1d','1h':'1d','4h':'1d','1d':'1w','1w':'1w'};
 const TRENDING_SIGNALS = ['Bullish Cross','Bearish Cross','Trend Active','Trend Established','Pullback Setup'];
 
 function computeAnalysis(asset, tf, epoch, closes, ohlc){
@@ -1877,11 +1880,11 @@ function showCooldownLabel(lastSync){
 // removed entirely — see ensureDataForTf). Left in place only in case timeframe-
 // specific staleness display is wanted again later.
 const BG_STALE_MS = {
-  '15m': 15*60*1000, '30m': 30*60*1000, '1h': 60*60*1000,
+  '15m': 15*60*1000, '1h': 60*60*1000,
   '4h': 4*60*60*1000, '1d': 24*60*60*1000, '1w': 7*24*60*60*1000
 };
 
-const WARMUP_ORDER = ['1w','1d','4h','1h','30m','15m'];
+const WARMUP_ORDER = ['1w','1d','4h','1h','15m'];
 async function warmUpAllTimeframes(){
   const btn = document.getElementById('warmupBtn');
   const banner = document.getElementById('warmupBanner');
@@ -2005,7 +2008,7 @@ function classTabsRender(){
   });
 }
 
-const TF_LABELS = {'15m':'15m','30m':'30m','1h':'1H','4h':'4H','1d':'1D','1w':'1W'};
+const TF_LABELS = {'15m':'15m','1h':'1H','4h':'4H','1d':'1D','1w':'1W'};
 function chartTfTabsRender(){
   const el = document.getElementById('chartTfTabs');
   el.innerHTML = Object.keys(TF_LABELS).map(tf=>
