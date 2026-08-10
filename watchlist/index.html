@@ -842,16 +842,16 @@ const TF_MINUTES = {'15m':15,'1h':60,'4h':240,'1d':1440,'1w':10080};
 /* =========================================================
    2. LIVE MARKET DATA (Twelve Data)
 ========================================================= */
-// build a4: briefly lowered 5000 -> 1000 to fix truncated/CORS-masked
-// parallel-fetch failures (see build ab/a4 history above). Restored to 5000
-// per Folarin's explicit request ("still retain the max stuff earlier") now
-// that the 30m timeframe has been removed entirely — that alone drops one of
-// six concurrent WARMUP_ORDER/batch groups, cutting overall parallel load
-// enough that the original 5000-bar max should be safe again. If the same
-// truncated-response/CORS errors return in the console after this, the next
-// lever is reducing symbols-per-batch (currently 4) or parallel batch
-// concurrency, not outputsize.
-const FETCH_OUTPUTSIZE = 5000;
+// build a5: 5000 was restored in build a4 on the theory that removing the
+// 30m timeframe would thin parallel load enough to keep it safe — confirmed
+// WRONG by Folarin's live console log: the exact same truncated/CORS-masked
+// failures are still happening on 15m batches even with 30m gone. 15m alone,
+// at 5000 bars/symbol x 4 symbols/batch, is still too much payload. Lowering
+// to 1500 — still ~15 days of 15-minute history (far more than any lookback
+// actually used: 50-period SMA, 40-bar S/R window, 60-bar AI tail) while
+// meaningfully shrinking every batch response. If failures persist after
+// this, next lever is symbols-per-batch (currently 4), not outputsize again.
+const FETCH_OUTPUTSIZE = 1500;
 // build ab: how many of the most recent bars actually get drawn in the SVG
 // chart. Kept small and separate from FETCH_OUTPUTSIZE on purpose — this
 // chart has no pan/zoom, so cramming thousands of bars into a fixed 700px
@@ -1014,6 +1014,24 @@ function renderKeyStatusPanel(){
   }).join('');
 }
 
+// build a6: TwelveData's own docs confirm the &timezone param only affects
+// intraday intervals (<1day) — daily/1week candle boundaries can't be shifted
+// via this API at all, so this fix ONLY helps 15m/1h/4h alignment, not the
+// daily EURAUD-weekend-candle issue diagnosed earlier (that one has no API
+// fix; the mitigation there is a confidence-penalty/tolerance approach, not
+// yet built). GUESS, NOT CONFIRMED: most Exness MT5 servers run on EET
+// (GMT+2 standard / GMT+3 during EU DST) — approximated here with IANA zone
+// 'Europe/Bucharest'. Folarin should verify his actual Exness server time
+// (hover the clock in the bottom-right of the MT5/web terminal) and change
+// this constant if it doesn't match — this is a starting guess, not a
+// guaranteed fix.
+const EXNESS_SERVER_TIMEZONE = 'Europe/Bucharest';
+function tzParamFor(interval){
+  // Daily/weekly ignore this param per TwelveData docs — only attach it for
+  // sub-daily intervals so we're not sending a no-op param on those calls.
+  return (interval === '1day' || interval === '1week') ? '' : `&timezone=${encodeURIComponent(EXNESS_SERVER_TIMEZONE)}`;
+}
+
 const TD_INTERVAL = {'15m':'15min','1h':'1h','4h':'4h','1d':'1day','1w':'1week'};
 
 async function twelveDataFetch(tdSymbols, interval, outputsize){
@@ -1025,7 +1043,7 @@ async function twelveDataFetch(tdSymbols, interval, outputsize){
   for (let attempt=0; attempt<TWELVEDATA_KEYS.length; attempt++){
     const keyIdx = await waitForCurrentKey();
     const key = TWELVEDATA_KEYS[keyIdx];
-    const url = `https://api.twelvedata.com/time_series?symbol=${encodeURIComponent(symbolParam)}&interval=${interval}&outputsize=${outputsize}&order=ASC&apikey=${key}`;
+    const url = `https://api.twelvedata.com/time_series?symbol=${encodeURIComponent(symbolParam)}&interval=${interval}&outputsize=${outputsize}&order=ASC&apikey=${key}${tzParamFor(interval)}`;
     try{
       const res = await fetch(url);
       checkCreditHeaders(res, keyIdx);
@@ -1555,7 +1573,7 @@ async function fastFetchBatch(tdSymbols, interval, keyIdx){
   fastKeyState.availableAt[keyIdx] = Date.now() + 61000;
   const key = TWELVEDATA_KEYS[keyIdx];
   const symbolParam = tdSymbols.join(',');
-  const url = `https://api.twelvedata.com/time_series?symbol=${encodeURIComponent(symbolParam)}&interval=${interval}&outputsize=${FETCH_OUTPUTSIZE}&order=ASC&apikey=${key}`;
+  const url = `https://api.twelvedata.com/time_series?symbol=${encodeURIComponent(symbolParam)}&interval=${interval}&outputsize=${FETCH_OUTPUTSIZE}&order=ASC&apikey=${key}${tzParamFor(interval)}`;
   try{
     const res = await fetch(url);
     checkCreditHeaders(res, keyIdx);
