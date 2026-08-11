@@ -283,7 +283,7 @@ body{
       <div class="brand-mark">FX</div>
       <div>
         <div class="brand-name">ForexSim</div>
-        <div class="brand-sub">SWING DESK · BUILD 2026-08-10-a7</div>
+        <div class="brand-sub">SWING DESK · BUILD 2026-08-10-a8</div>
       </div>
     </div>
     <button class="refresh-btn" id="refreshBtn">
@@ -1075,19 +1075,20 @@ async function twelveDataFetch(tdSymbols, interval, outputsize){
 
 async function fetchAllCloses(tf){
   const interval = TD_INTERVAL[tf];
-  // build a7: raised 4 -> 9, per Folarin's "warm up takes too long" report.
-  // Real cause: each key has a hardcoded 61s reuse cooldown (see
-  // fastKeyState.availableAt below) — at BATCH_SIZE=4, 33 assets = 9 batches,
-  // which needs 3 rounds across 4 keys, forcing ~2 minutes of pure waiting
-  // PER TIMEFRAME (round 2 and 3 each wait out the previous round's cooldown)
-  // before counting any actual network time — across 5 warm-up timeframes,
-  // that's the real 10-15+ minute cost, not fetch speed itself. 9 symbols/
-  // batch means 33 assets fits in 4 batches total — exactly 1 round across 4
-  // keys, so no same-key reuse and no 61s wait at all within a timeframe.
-  // Safe payload-wise: 9 symbols x FETCH_OUTPUTSIZE(1500) = 13,500 bar-symbol
-  // units, still well under the 4 x 5000 = 20,000 that was actually causing
-  // truncated-response failures before that outputsize cut.
-  const BATCH_SIZE = 9;
+  // build a8: FIXES A REAL BUG I INTRODUCED IN a7. Raising BATCH_SIZE to 9
+  // was wrong — confirmed by Folarin's actual console error: "9 API credits
+  // were used, with the current limit being 8." TwelveData's free tier caps
+  // usage at 8 API CREDITS PER MINUTE, and each symbol in a batch call costs
+  // 1 credit — so 9 symbols in one call was guaranteed to fail every single
+  // time, on every key, instantly (which is why warm-up finished in under a
+  // second — nothing was actually being fetched). 8 is the real ceiling, not
+  // a number I can push higher for more speed; going above it doesn't get
+  // more data faster, it gets zero data. 33 assets / 8 per batch = 5 batches;
+  // with 4 keys in parallel that's 2 rounds per timeframe (down from 3 at the
+  // original BATCH_SIZE=4) — a real, smaller speed gain than a7 claimed, but
+  // one that actually respects the account's real limit instead of ignoring
+  // it.
+  const BATCH_SIZE = 8;
   const closesResults = {};
   const ohlcResults = {};
   const totalBatches = Math.ceil(ASSETS.length / BATCH_SIZE);
@@ -1611,10 +1612,10 @@ async function fastFetchBatch(tdSymbols, interval, keyIdx){
 
 async function fetchAllClosesFast(tf, maxParallel){
   const interval = TD_INTERVAL[tf];
-  // build a7: see fetchAllCloses's comment above — same fix, same reasoning.
-  // This is the path Refresh/Warm Up actually use, so this is the change that
-  // actually shortens Folarin's "warm up takes too long" wait.
-  const BATCH_SIZE = 9;
+  // build a8: see fetchAllCloses's comment above — same real-limit fix (8
+  // credits/minute, 1 credit per symbol), same reasoning. This is the path
+  // Refresh/Warm Up actually use, so this is the change that matters.
+  const BATCH_SIZE = 8;
   const closesResults = {};
   const ohlcResults = {};
   const batches = [];
